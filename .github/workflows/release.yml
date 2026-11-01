@@ -15,11 +15,17 @@ on:
 permissions:
   contents: write
 
+# Wird ein Release auf der Webseite mit neuem Tag veröffentlicht, starten beide Auslöser gleichzeitig.
+# Nacheinander statt parallel, sonst überschreiben sich die hochgeladenen Dateien gegenseitig.
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.release.tag_name || github.ref }}
 
