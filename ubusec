@@ -383,6 +383,21 @@ mod_config() {
     fi
   done
 
+  # --- Arbeitsspeicher und Swap ----------------------------------------------
+  local swt swf pct swp
+  read -r swt swf < <(awk '/^SwapTotal:/{t=$2} /^SwapFree:/{f=$2} END{print t+0, f+0}' /proc/meminfo)
+  if (( swt > 0 )); then
+    pct=$(( (swt - swf) * 100 / swt ))
+    if (( pct > 50 )); then
+      add NIEDRIG config "Arbeitsspeicher knapp: Swap zu $pct % belegt" \
+        "Belegt: $(( (swt - swf) / 1024 )) MB von $(( swt / 1024 )) MB" \
+        "Größte Verbraucher: $(ps -eo comm,rss --sort=-rss | awk 'NR>1 && NR<=6 {printf "%s %d MB; ", $1, $2/1024}')"
+    fi
+    swp=$(sysctl -n vm.swappiness 2>/dev/null)
+    [ -n "$swp" ] && (( swp > 30 )) && add INFO config "Swap wird früh genutzt (vm.swappiness = $swp)" \
+      "Empfehlung für Server mit Datenbanken: vm.swappiness = 10"
+  fi
+
   # --- Konten --------------------------------------------------------------
   local u
   u=$(awk -F: '$3==0 && $1!="root"{printf "%s ",$1}' /etc/passwd)
@@ -1142,10 +1157,11 @@ ExecStart=$INSTALL_PATH --quick --quiet --trigger timer
 Nice=19
 IOSchedulingClass=idle
 CPUWeight=20
-# Speicherschutz: Scans dürfen höchstens 40 % des Arbeitsspeichers belegen. Wird es eng,
-# trifft es den Scanner (nicht Webserver oder Datenbank), und ein beendeter Teilprozess
-# bricht nicht den ganzen Scan ab.
+# Speicherschutz: Scans dürfen höchstens 40 % des Arbeitsspeichers belegen und nie in den
+# Swap ausweichen (der bleibt für Webserver und Datenbank). Wird es eng, trifft es den
+# Scanner, und ein beendeter Teilprozess bricht nicht den ganzen Scan ab.
 MemoryMax=40%
+MemorySwapMax=0
 OOMScoreAdjust=500
 OOMPolicy=continue
 TimeoutStartSec=6h
@@ -1474,6 +1490,7 @@ write_settings_json() {
     export $SETTING_KEYS QUICK_ON QUICK_DAYS QUICK_TIME FULL_ON FULL_DAYS FULL_TIME
     export UBUSEC_MAILER=$mailer UBUSEC_KEYS="$SETTING_KEYS QUICK_ON QUICK_DAYS QUICK_TIME FULL_ON FULL_DAYS FULL_TIME"
     export UBUSEC_CPUS="$(nproc 2>/dev/null)" UBUSEC_MEM="$(awk '/^MemTotal:/{print int($2/1048576+0.5)}' /proc/meminfo)"
+    export UBUSEC_SWAP="$(awk '/^SwapTotal:/{printf "%.1f", $2/1048576}' /proc/meminfo | sed 's/\.0$//; s/\./,/')"
     export UBUSEC_AUTO="$(clam_auto_workers)" UBUSEC_NCDIRS="$(nextcloud_datadirs | tr '\n' ' ')" UBUSEC_BACKUPDIRS="$(backup_dirs | tr '\n' ' ')"
     python3 -I -c 'import json, os, time
 d = {k: os.environ.get(k, "") for k in os.environ["UBUSEC_KEYS"].split()}
@@ -1482,6 +1499,7 @@ d["_mailer"] = os.environ["UBUSEC_MAILER"] == "1"
 d["_updated"] = int(time.time())
 d["_cpus"] = os.environ.get("UBUSEC_CPUS", "")
 d["_mem_gb"] = os.environ.get("UBUSEC_MEM", "")
+d["_swap_gb"] = os.environ.get("UBUSEC_SWAP", "")
 d["_auto_parallel"] = os.environ.get("UBUSEC_AUTO", "1")
 d["_nc_datadirs"] = os.environ.get("UBUSEC_NCDIRS", "").split()
 d["_backup_dirs"] = os.environ.get("UBUSEC_BACKUPDIRS", "").split()
@@ -1670,10 +1688,11 @@ ExecStart=$INSTALL_PATH --from-queue
 Nice=19
 IOSchedulingClass=idle
 CPUWeight=20
-# Speicherschutz: Scans dürfen höchstens 40 % des Arbeitsspeichers belegen. Wird es eng,
-# trifft es den Scanner (nicht Webserver oder Datenbank), und ein beendeter Teilprozess
-# bricht nicht den ganzen Scan ab.
+# Speicherschutz: Scans dürfen höchstens 40 % des Arbeitsspeichers belegen und nie in den
+# Swap ausweichen (der bleibt für Webserver und Datenbank). Wird es eng, trifft es den
+# Scanner, und ein beendeter Teilprozess bricht nicht den ganzen Scan ab.
 MemoryMax=40%
+MemorySwapMax=0
 OOMScoreAdjust=500
 OOMPolicy=continue
 TimeoutStartSec=14h

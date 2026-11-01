@@ -120,6 +120,18 @@ _H = [
                "$ sudo sysctl --system",
                "Vorsicht bei Servern mit Docker/VPN: ip_forward und Redirect-Werte können dort nötig sein."],
         effort="15 Min")),
+    (r"^config\|Arbeitsspeicher knapp", dict(
+        why="Ist der Swap stark belegt, reicht der Arbeitsspeicher im Alltag nicht. Programme werden langsam, und bei "
+            "Lastspitzen beendet der Kernel Prozesse zwangsweise (OOM) – Websites, Datenbank oder ein laufender Scan.",
+        steps=["Größte Verbraucher ansehen: ps -eo comm,rss --sort=-rss | head",
+               "Häufige Ursachen: zu viele PHP-FPM-Prozesse (pm.max_children), großer MySQL-Puffer (innodb_buffer_pool_size), "
+               "Nextcloud-Hintergrundjobs.",
+               "Virenscan entlasten: Einstellungen → Scan-Einstellungen → weniger parallele Prozesse",
+               "Dauerhaft knapp: Arbeitsspeicher beim Provider aufstocken."], effort="prüfen")),
+    (r"^config\|Swap wird früh genutzt", dict(
+        why="Mit dem Standardwert lagert Linux schon früh Daten in den Swap aus. Auf Servern mit Datenbanken soll der Swap "
+            "nur ein Notpolster sein.",
+        steps=["$ echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swap.conf && sudo sysctl --system"], effort="5 Min")),
     (r"^config\|Weitere Konten mit UID 0", dict(
         why="Jedes Konto mit UID 0 hat volle Root-Rechte. Zusätzliche UID-0-Konten sind ein klassisches Zeichen für "
             "eine versteckte Hintertür.",

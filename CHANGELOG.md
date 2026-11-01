@@ -8,7 +8,11 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   beendet das System bevorzugt den Scanner statt Webserver oder Datenbank.
 - Wird ein paralleler clamscan-Prozess vom System beendet, läuft der Scan weiter; die noch nicht geprüften
   Dateien werden anschließend mit einem einzelnen Prozess nachgeholt (bisher brach der ganze Scan ab).
+- Der Virenscan weicht nie in den Swap aus (der bleibt Webserver und Datenbank vorbehalten); erreicht er seine
+  Grenze, wird er beendet und nachgeholt statt den Server auszubremsen.
 - Vorsichtigere automatische Prozesszahl (freier Speicher und Speichergrenze werden berücksichtigt).
+- Neue Prüfung „Arbeitsspeicher knapp“, wenn der Swap zu mehr als der Hälfte belegt ist; Hinweis auf
+  vm.swappiness; Arbeitsspeicher und Swap werden in den Scan-Einstellungen angezeigt.
 - Abbruchgrund in der Weboberfläche: Zeitpunkt, Bereich, Fortschritt und Ursache (Benutzer, systemctl stop,
   Strg+C, Zeitlimit, Neustart, Speichermangel, Programmfehler).
 

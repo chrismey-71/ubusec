@@ -172,7 +172,8 @@
         {% for n in range(1, 9) %}<option value="{{ n }}" {% if conf.get('CLAM_PARALLEL') == n|string %}selected{% endif %}>{{ n }}</option>{% endfor %}
       </select>
       <small class="muted">Jeder Prozess nutzt einen Prozessorkern und etwa 1,5 GB Arbeitsspeicher.
-        Dieser Server: {{ conf._cpus or '?' }} Kerne, {{ conf._mem_gb or '?' }} GB. Die Scans laufen mit niedrigster Priorität, Websites haben immer Vorrang.</small></label>
+        Dieser Server: {{ conf._cpus or '?' }} Kerne, {{ conf._mem_gb or '?' }} GB Arbeitsspeicher{% if conf._swap_gb and conf._swap_gb != '0' %}, {{ conf._swap_gb }} GB Swap{% endif %}.
+        Der Virenscan nutzt höchstens 40 % des Arbeitsspeichers und nie den Swap. Die Scans laufen mit niedrigster Priorität, Websites haben immer Vorrang.</small></label>
     <fieldset class="excl">
       <legend>Vom Virenscan ausnehmen</legend>
       <label class="check"><input type="checkbox" name="CLAM_EXCLUDE_DB" {% if conf.get('CLAM_EXCLUDE_DB', '1') == '1' %}checked{% endif %}>
