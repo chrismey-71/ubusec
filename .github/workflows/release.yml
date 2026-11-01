@@ -1,10 +1,16 @@
-# Baut bei jedem Versions-Tag (z. B. v1.4.0) das Installationspaket samt Prüfsumme
-# und veröffentlicht es als GitHub-Release. Die Release-Notizen stammen aus CHANGELOG.md.
+# Baut das Installationspaket samt Prüfsumme und hängt es an das GitHub-Release.
+#
+# Zwei Wege, eine neue Version zu veröffentlichen:
+#   1. Auf GitHub: Releases → „Draft a new release“ → Tag z. B. v1.4.1 → „Publish release“
+#   2. Lokal:      git tag -a v1.4.1 -m "ubusec 1.4.1" && git push origin v1.4.1
+# Die Versionsnummer im Tag muss zu UBUSEC_VERSION im Skript passen.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -14,15 +20,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
 
       - name: Versionsnummer prüfen
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
           VER=$(grep -m1 '^UBUSEC_VERSION=' ubusec | cut -d'"' -f2)
-          if [ "$TAG" != "$VER" ]; then
+          if [ "${TAG#v}" != "$VER" ]; then
             echo "Tag $TAG passt nicht zu UBUSEC_VERSION=$VER im Skript" >&2; exit 1
           fi
           echo "VER=$VER" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Syntax prüfen
         run: |
@@ -37,11 +46,14 @@ jobs:
           tar czf "dist/ubusec-$VER.tar.gz" --owner=0 --group=0 -C dist ubusec
           (cd dist && sha256sum "ubusec-$VER.tar.gz" > SHA256SUMS)
           awk -v v="$VER" 'index($0, "## " v) == 1 {f = 1; next} /^## / && f {exit} f' CHANGELOG.md > notes.md
-          printf '\n---\nInstallation und Update: siehe README. Auf einem Server mit ubusec ≥ 1.4: `sudo ubusec --update`\n' >> notes.md
+          printf '\n---\nInstallation: siehe README. Update auf einem Server mit ubusec ≥ 1.4: `sudo ubusec --update`\n' >> notes.md
 
-      - name: Release veröffentlichen
+      - name: Release anlegen bzw. Paket anhängen
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "dist/ubusec-$VER.tar.gz" dist/SHA256SUMS \
-            --title "ubusec $VER" --notes-file notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "dist/ubusec-$VER.tar.gz" dist/SHA256SUMS --clobber
+          else
+            gh release create "$TAG" "dist/ubusec-$VER.tar.gz" dist/SHA256SUMS --title "ubusec $VER" --notes-file notes.md
+          fi
