@@ -1646,6 +1646,8 @@ lynis_upstream() { # aktuelle Lynis-Version aus der Paketquelle des Herstellers 
       # Schlüssel gilt nur für diese Quelle (signed-by), nicht für alle Paketquellen
       echo "deb [arch=$(dpkg --print-architecture) signed-by=$CISOFY_KEYRING] https://packages.cisofy.com/community/lynis/deb/ stable main" >"$CISOFY_LIST"
       printf 'Package: lynis\nPin: origin packages.cisofy.com\nPin-Priority: 600\n' >/etc/apt/preferences.d/lynis
+      # apt prüft Signaturen als Benutzer _apt – die Dateien müssen für alle lesbar sein (ubusec läuft mit umask 027)
+      chmod 644 "$CISOFY_KEYRING" "$CISOFY_LIST" /etc/apt/preferences.d/lynis
       local miss ok=1
       miss=$(cisofy_apt_check) || ok=0
       if [ $ok = 0 ] && [ -n "$miss" ] && cisofy_key_from_keyserver "$miss"; then

@@ -9,8 +9,9 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   und Empfehlungen, nicht erst nach dem nächsten Scan.
 - Behoben: Die Seite „Werkzeuge“ zeigte nach einem Update eine ältere Version als „Neueste Version“ (veralteter
   Zwischenspeicher). „Jetzt prüfen“ fragt GitHub jetzt immer sofort.
-- Lynis-Paketquelle des Herstellers: Kann apt die Quelle nicht prüfen (z. B. NO_PUBKEY nach einem Schlüsselwechsel
-  bei CISOfy), holt ubusec den fehlenden Signaturschlüssel vom Ubuntu-Keyserver – aber nur, wenn er zum selben
+- Behoben: Die Lynis-Paketquelle des Herstellers scheiterte mit „NO_PUBKEY“, weil die Schlüsseldatei nur für root
+  lesbar war – apt prüft Signaturen aber als Benutzer _apt.
+- Lynis-Paketquelle: Fehlt der Signaturschlüssel trotzdem (z. B. nach einem Schlüsselwechsel bei CISOfy), holt ubusec den fehlenden Signaturschlüssel vom Ubuntu-Keyserver – aber nur, wenn er zum selben
   Hauptschlüssel gehört wie die Schlüsseldatei von cisofy.com. Klappt das nicht, wird die Quelle wieder entfernt,
   damit „apt update“ und die automatischen Sicherheitsupdates fehlerfrei bleiben.
 
