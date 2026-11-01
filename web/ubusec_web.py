@@ -247,9 +247,21 @@ def get_report(rid):
     return load_report(os.path.join(LOG_DIR, "report-%s.json" % rid))
 
 
+def ignore_regexes():
+    """Fehlalarm-Muster aus ignore.list – damit Ausgeblendetes sofort verschwindet, nicht erst beim nächsten Scan."""
+    rx = []
+    for e in ignore_entries() or []:
+        try:
+            rx.append(re.compile(e["pattern"]))
+        except re.error:
+            pass
+    return rx
+
+
 def current_state(reports):
     """Aktueller Gesamtstand: je Modul die Meldungen aus dem jüngsten Scan, der es geprüft hat."""
     seen, findings, sources = set(), [], {}
+    ign = ignore_regexes()
     for r in reports:
         for m in r.get("modules", {}):
             if m in seen:
@@ -257,7 +269,7 @@ def current_state(reports):
             seen.add(m)
             sources[m] = r
             for f in r["findings"]:
-                if f["module"] == m:
+                if f["module"] == m and not any(x.search("%s|%s|" % (f["module"], f["message"])) for x in ign):
                     findings.append(dict(f, report=r["id"]))
     rank = {s: i for i, s in enumerate(SEVERITIES)}
     order = {m: i for i, (m, _, _) in enumerate(MODULES)}
@@ -794,7 +806,7 @@ def create_app():
         if request.form.get("confirm") != "ja":
             flash("Bitte bestätige, dass du die Änderungen geprüft hast.", "error")
             return redirect(request.referrer or url_for("recommendations"))
-        enqueue({"action": "accept", "user": session["user"]})
+        enqueue_ctl({"action": "accept", "user": session["user"]})
         flash("Der aktuelle Zustand wird als neue Baseline übernommen. Beim nächsten Scan entfallen die "
               "Baseline-Meldungen.", "ok")
         return redirect(url_for("recommendations"))
@@ -810,7 +822,7 @@ def create_app():
         # wechselnden Anzahlen greift
         msg = re.sub(r"\d+", "\x00", f["message"])
         pat = "^" + re.escape(f["module"]) + r"\|" + re.escape(msg).replace("\x00", "[0-9]+") + r"\|"
-        enqueue({"action": "ignore", "pattern": pat, "user": session["user"]})
+        enqueue_ctl({"action": "ignore", "pattern": pat, "user": session["user"]})
         flash("„%s“ wird künftig ausgeblendet (Eintrag in /etc/ubusec/ignore.list)." % f["message"], "ok")
         return redirect(request.referrer or url_for("recommendations"))
 
