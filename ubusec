@@ -655,6 +655,46 @@ chk_bindshell() { # chk_bindshell ZEILE
   fi
 }
 
+# Collabora Online aus der Nextcloud-App „Built-in CODE Server“ (richdocumentscode) entpackt sich als
+# AppImage nach /tmp/appimage_extracted_<MD5>. Als harmlos gilt ein solcher Ordner nur, wenn
+#   – die Prozesse Collabora-Programme daraus sind und nicht als root laufen,
+#   – das zugehörige AppImage im richdocumentscode-Ordner einer Nextcloud liegt und
+#   – die MD5-Prüfsumme dieser Datei genau dem Ordnernamen entspricht (so benennt ihn die AppImage-Laufzeit).
+declare -A CODE_OK=() CODE_MD5=() CODE_USER=()
+code_md5() { [ -n "${CODE_MD5[$1]:-}" ] || CODE_MD5[$1]=$(md5sum <"$1" 2>/dev/null | cut -d' ' -f1); echo "${CODE_MD5[$1]}"; }
+code_verify() { # code_verify LISTE – entfernt geprüfte Collabora-Prozesse aus der Liste, füllt CODE_OK
+  local list=$1 line pid exe dir sum ai u cand=() rx='^(/tmp/appimage_extracted_([0-9a-f]{32}))/usr/bin/(coolwsd|coolforkit[a-z-]*|coolmount|loolwsd|loolforkit[a-z-]*)$'
+  declare -A want=()
+  [ -s "$list" ] || return 0
+  while IFS= read -r line; do
+    pid=${line#PID }; pid=${pid%%:*}
+    exe=$(readlink "/proc/$pid/exe" 2>/dev/null) || continue
+    [[ $exe =~ $rx ]] || continue
+    dir=${BASH_REMATCH[1]}; sum=${BASH_REMATCH[2]}
+    u=$(stat -c %U "/proc/$pid" 2>/dev/null); [ -n "$u" ] && [ "$u" != root ] || { want[$dir]=bad; continue; }
+    [ "${want[$dir]:-}" = bad ] || { want[$dir]=$sum; CODE_USER[$dir]=$u; }
+    # das AppImage nennt sich selbst in der Umgebung des Prozesses
+    ai=$(tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | sed -n 's/^APPIMAGE=//p' | head -1)
+    [[ $ai == */richdocumentscode*/collabora/*.AppImage ]] && [ -f "$ai" ] && cand+=("$ai")
+  done <"$list"
+  (( ${#want[@]} > 0 )) || return 0
+  # sonst im richdocumentscode-Ordner der Nextcloud-Installationen suchen
+  if (( ${#cand[@]} == 0 )); then
+    local roots=() r; for r in $WEB_PATHS /var/www; do [ -d "$r" ] && roots+=("$r"); done
+    (( ${#roots[@]} > 0 )) && while IFS= read -r ai; do cand+=("$ai"); done < <(
+      timeout 120 find "${roots[@]}" -maxdepth 8 \( -name data -o -name files -o -name Maildir -o -name logs \) -prune \
+        -o -type f -name '*.AppImage' -path '*/richdocumentscode*/collabora/*' -print 2>/dev/null | sort -u)
+  fi
+  for dir in "${!want[@]}"; do
+    [ "${want[$dir]}" = bad ] && continue
+    for ai in "${cand[@]}"; do
+      [ "$(code_md5 "$ai")" = "${want[$dir]}" ] && { CODE_OK[$dir]=$ai; break; }
+    done
+  done
+  for dir in "${!CODE_OK[@]}"; do grep -vF -- ": $dir/usr/bin/" "$list" >"$list.n"; mv -f "$list.n" "$list"; done
+  return 0
+}
+
 mod_rootkit() {
   # --- rkhunter --------------------------------------------------------------
   if need rkhunter rootkit rkhunter; then
@@ -724,8 +764,15 @@ heuristics() {
           *) echo "PID ${p#/proc/}: $exe  [$cmd]" >>"$RAW/proc-deleted.txt" ;; esac ;;
     esac
   done
+  code_verify "$RAW/proc-tmp.txt"
   if [ -s "$RAW/proc-tmp.txt" ]; then take "$RAW/proc-tmp.txt" 8
     add KRITISCH rootkit "Prozesse laufen aus temporären Verzeichnissen" "${ITEMS[@]}"
+  fi
+  if (( ${#CODE_OK[@]} > 0 )); then
+    local d info=()
+    for d in "${!CODE_OK[@]}"; do info+=("$d → entpackt aus ${CODE_OK[$d]} (MD5-Prüfsumme stimmt, läuft als ${CODE_USER[$d]})"); done
+    add INFO rootkit "Collabora Online (Nextcloud Office) läuft aus /tmp – erkannt und geprüft" "${info[@]}" \
+      "Die Nextcloud-App „Built-in CODE Server“ entpackt sich dorthin; der Ordnername ist die Prüfsumme der Original-Datei"
   fi
   if [ -s "$RAW/proc-deleted.txt" ]; then take "$RAW/proc-deleted.txt" 8
     add HOCH rootkit "Prozesse laufen aus gelöschten Dateien außerhalb der Systempfade" "${ITEMS[@]}"
@@ -758,6 +805,10 @@ heuristics() {
     if [ "$(head -c4 "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = 7f454c46 ]; then echo "$f" >>"$RAW/tmp-elf.txt"
     elif [ -x "$f" ]; then echo "$f" >>"$RAW/tmp-exec.txt"; fi
   done < <(find /tmp /var/tmp /dev/shm -xdev -type f \( -perm /111 -o -size +10k \) -print0 2>/dev/null)
+  if (( ${#CODE_OK[@]} > 0 )) && [ -s "$RAW/tmp-elf.txt" ]; then   # Dateien des geprüften Collabora-Ordners
+    local d; for d in "${!CODE_OK[@]}"; do grep -vF -- "$d/" "$RAW/tmp-elf.txt" >"$RAW/tmp-elf.txt.n"; mv -f "$RAW/tmp-elf.txt.n" "$RAW/tmp-elf.txt"
+      grep -vF -- "$d/" "$RAW/tmp-exec.txt" >"$RAW/tmp-exec.txt.n"; mv -f "$RAW/tmp-exec.txt.n" "$RAW/tmp-exec.txt"; done
+  fi
   if [ -s "$RAW/tmp-elf.txt" ]; then take "$RAW/tmp-elf.txt" 8
     add HOCH rootkit "Programmdateien (ELF) in temporären Verzeichnissen" "${ITEMS[@]}"
   fi

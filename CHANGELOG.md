@@ -21,6 +21,9 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   vm.swappiness; Arbeitsspeicher und Swap werden in den Scan-Einstellungen angezeigt.
 - chkrootkit-Warnung „Potential bindshell“ wird überprüft: Lauscht auf dem Port ein bekannter Dienst (z. B. Postfix
   auf 465/SMTPS), erscheint sie als erkannter Fehlalarm statt als kritischer Befund; sonst mit Programmname.
+- Collabora Online aus der Nextcloud-App „Built-in CODE Server“ (läuft aus /tmp/appimage_extracted_…) wird
+  erkannt und nicht mehr als kritischer Befund gemeldet – nur wenn die MD5-Prüfsumme des AppImage aus dem
+  Nextcloud-App-Ordner zum Ordnernamen passt und die Prozesse nicht als root laufen.
 - Abbruchgrund in der Weboberfläche: Zeitpunkt, Bereich, Fortschritt und Ursache (Benutzer, systemctl stop,
   Strg+C, Zeitlimit, Neustart, Speichermangel, Programmfehler).
 
