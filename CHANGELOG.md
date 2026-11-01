@@ -24,6 +24,8 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 - Collabora Online aus der Nextcloud-App „Built-in CODE Server“ (läuft aus /tmp/appimage_extracted_…) wird
   erkannt und nicht mehr als kritischer Befund gemeldet – nur wenn die MD5-Prüfsumme des AppImage aus dem
   Nextcloud-App-Ordner zum Ordnernamen passt und die Prozesse nicht als root laufen.
+- Treffer in den Testdateien des Pakets clamav-testfiles (/usr/share/clamav-testfiles, Signatur
+  „Clamav.Test.File“) werden als harmlos erkannt, sofern die Paketdateien unverändert sind.
 - Abbruchgrund in der Weboberfläche: Zeitpunkt, Bereich, Fortschritt und Ursache (Benutzer, systemctl stop,
   Strg+C, Zeitlimit, Neustart, Speichermangel, Programmfehler).
 

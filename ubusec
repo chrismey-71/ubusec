@@ -1056,6 +1056,18 @@ mod_malware() {
   cat "$RAW"/clam.err.* 2>/dev/null | grep -v '^$' >"$RAW/clamscan.err"
   rm -f "$RAW"/clam.chunk.* "$RAW"/clam.part.* "$RAW"/clam.out.* "$RAW"/clam.err.* "$RAW"/clam.done.* "$RAW/clam.list" "$RAW/clam-found.txt"
 
+  # Testdateien des Pakets clamav-testfiles sind absichtlich „infiziert“ (harmlose Prüfmuster).
+  # Nur als harmlos werten, wenn sie im Paketordner liegen, die Testsignatur tragen und das Paket unverändert ist.
+  local tf=0
+  if grep -q '^/usr/share/clamav-testfiles/' "$RAW/clam-hits.txt" && dpkg -s clamav-testfiles >/dev/null 2>&1 \
+     && [ -z "$(dpkg --verify clamav-testfiles 2>/dev/null)" ]; then
+    tf=$(grep -ciE '^/usr/share/clamav-testfiles/[^/]+: (Clamav\.Test\.File-[0-9]+|[A-Za-z.]*EICAR[A-Za-z0-9_.-]*)$' "$RAW/clam-hits.txt")
+    grep -viE '^/usr/share/clamav-testfiles/[^/]+: (Clamav\.Test\.File-[0-9]+|[A-Za-z.]*EICAR[A-Za-z0-9_.-]*)$' "$RAW/clam-hits.txt" >"$RAW/clam-hits.n"
+    mv -f "$RAW/clam-hits.n" "$RAW/clam-hits.txt"
+  fi
+  (( tf > 0 )) && add INFO malware "ClamAV: $tf Testdateien des Pakets clamav-testfiles erkannt (harmlos)" \
+    "/usr/share/clamav-testfiles/ – absichtlich präparierte Prüfmuster, mit denen sich ClamAV selbst testet; Paketdateien unverändert" \
+    "Nicht nötig für den Betrieb; entfernen mit: sudo apt remove clamav-testfiles"
   local hits dur=$(( $(date +%s) - SUB_START ))
   hits=$(grep -c . "$RAW/clam-hits.txt")
   if (( hits > 0 )); then take "$RAW/clam-hits.txt" 15
