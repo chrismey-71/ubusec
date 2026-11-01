@@ -19,6 +19,8 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 - Vorsichtigere automatische Prozesszahl (freier Speicher und Speichergrenze werden berücksichtigt).
 - Neue Prüfung „Arbeitsspeicher knapp“, wenn der Swap zu mehr als der Hälfte belegt ist; Hinweis auf
   vm.swappiness; Arbeitsspeicher und Swap werden in den Scan-Einstellungen angezeigt.
+- chkrootkit-Warnung „Potential bindshell“ wird überprüft: Lauscht auf dem Port ein bekannter Dienst (z. B. Postfix
+  auf 465/SMTPS), erscheint sie als erkannter Fehlalarm statt als kritischer Befund; sonst mit Programmname.
 - Abbruchgrund in der Weboberfläche: Zeitpunkt, Bereich, Fortschritt und Ursache (Benutzer, systemctl stop,
   Strg+C, Zeitlimit, Neustart, Speichermangel, Programmfehler).
 

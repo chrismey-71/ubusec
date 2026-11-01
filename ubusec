@@ -625,6 +625,36 @@ mod_baseline() {
 # ============================================================================
 #  MODUL: rootkit – rkhunter, chkrootkit, unhide, eigene Einbruchs-Heuristiken
 # ============================================================================
+# chkrootkit meldet „Potential bindshell“ allein anhand der Portnummer. Mehrere dieser Ports
+# gehören zu ganz normalen Diensten (465 = SMTPS des Mailservers, 4369 = Erlang …). Deshalb:
+# nachsehen, welches Programm wirklich auf dem Port lauscht, und nur Unbekanntes als kritisch melden.
+BINDSHELL_OK_RX='^(master|postfix|smtpd|exim|exim4|sendmail|dovecot|apache2|httpd|nginx|haproxy|epmd|beam\.smp|sshd|named|icinga2)$'
+port_name() { case $1 in 465) echo "SMTPS – verschlüsselter Mailversand" ;; 4369) echo "Erlang-Portmapper (RabbitMQ, CouchDB)" ;;
+  5665) echo "Icinga" ;; 6667) echo "IRC" ;; *) echo "" ;; esac; }
+chk_bindshell() { # chk_bindshell ZEILE
+  local line=$1 p procs ok=() bad=() gone=() name ports
+  have ss || { add KRITISCH rootkit "chkrootkit: $line"; return; }
+  ports=$(grep -oE '[0-9]+' <<<"${line##*ports:}" | paste -sd'|' -)
+  for p in ${ports//|/ }; do
+    procs=$(ss -Htlnp "sport = :$p" 2>/dev/null | grep -oE 'users:\(\("[^"]+' | sed 's/.*"//' | sort -u | paste -sd, -)
+    name=$(port_name "$p")
+    local shown=${procs/master/master (Postfix)}
+    if [ -z "$procs" ]; then gone+=("Port $p${name:+ ($name)}: derzeit lauscht dort kein Programm")
+    elif ! tr ',' '\n' <<<"$procs" | grep -qvE "$BINDSHELL_OK_RX"; then ok+=("Port $p${name:+ ($name)}: gehört zu $shown")
+    else bad+=("Port $p${name:+ ($name)}: gehört zu $shown"); fi
+  done
+  if (( ${#bad[@]} > 0 )); then
+    add KRITISCH rootkit "chkrootkit: $line" "${bad[@]}" "${gone[@]}" "${ok[@]}" \
+      "Prüfen: sudo ss -tlnp | grep -E ':($ports)\\b' – welches Programm ist das, wo liegt es (ls -l /proc/PID/exe)?"
+  elif (( ${#gone[@]} > 0 )); then
+    add MITTEL rootkit "chkrootkit: Bindshell-Warnung – Port nicht zuzuordnen" "${gone[@]}" "${ok[@]}" \
+      "Der Dienst lief wohl nur kurz. Beim nächsten Scan erneut prüfen; taucht die Warnung wieder auf: sudo ss -tlnp | grep -E ':($ports)\\b'"
+  else
+    add INFO rootkit "chkrootkit: Bindshell-Warnung ist ein Fehlalarm" "${ok[@]}" \
+      "chkrootkit erkennt Hintertüren nur an der Portnummer; auf diesem Port lauscht ein bekannter Dienst"
+  fi
+}
+
 mod_rootkit() {
   # --- rkhunter --------------------------------------------------------------
   if need rkhunter rootkit rkhunter; then
@@ -650,7 +680,9 @@ mod_rootkit() {
   if need chkrootkit rootkit chkrootkit; then
     chkrootkit -q >"$RAW/chkrootkit.txt" 2>&1
     grep -i 'INFECTED' "$RAW/chkrootkit.txt" >"$RAW/chkrootkit-inf.txt"
-    while IFS= read -r w; do add KRITISCH rootkit "chkrootkit: $w"; done <"$RAW/chkrootkit-inf.txt"
+    while IFS= read -r w; do
+      if [[ $w == *bindshell* ]]; then chk_bindshell "$w"; else add KRITISCH rootkit "chkrootkit: $w"; fi
+    done <"$RAW/chkrootkit-inf.txt"
     grep -viE 'INFECTED|^\s*$|not (found|tested|infected)|nothing (found|detected)' "$RAW/chkrootkit.txt" >"$RAW/chkrootkit-other.txt"
     if [ -s "$RAW/chkrootkit-other.txt" ]; then take "$RAW/chkrootkit-other.txt" 5
       add MITTEL rootkit "chkrootkit meldet Auffälligkeiten (oft harmlos, bitte prüfen)" "${ITEMS[@]}"

@@ -299,6 +299,14 @@ _H = [
         steps=["Details im rkhunter-Log nachlesen (Rohdaten).",
                "Erklärbarer Fehlalarm: als Fehlalarm ausblenden.",
                "Rootkit-Meldung: Notfall-Hinweise befolgen."], effort="prüfen")),
+    (r"^rootkit\|chkrootkit: .*bindshell", dict(
+        why="chkrootkit erkennt eine „Bindshell“ (Hintertür, die auf einem Port auf Befehle wartet) nur an der Portnummer. "
+            "Auf diesem Port lauscht ein Programm, das ubusec nicht als normalen Dienst kennt – oder gar keines mehr.",
+        steps=["Wer lauscht dort? $ sudo ss -tlnp | grep ':PORT'",
+               "Woher stammt das Programm? $ sudo ls -l /proc/PID/exe   und   dpkg -S $(readlink /proc/PID/exe)",
+               "Gehört es zu einem Paket und ist bekannt (z. B. ein eigener Dienst): als Fehlalarm ausblenden.",
+               "Unbekanntes Programm aus /tmp, /dev/shm oder einem versteckten Ordner: Server vom Netz nehmen und genau prüfen."],
+        effort="15 Min")),
     (r"^rootkit\|chkrootkit: .*INFECTED", dict(
         why="chkrootkit hat Spuren eines bekannten Rootkits gefunden.",
         steps=["Gegenprüfen mit rkhunter und einem zweiten Scan.", "Bestätigt: Notfall-Hinweise befolgen."],
