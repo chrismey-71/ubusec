@@ -11,6 +11,8 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   Zwischenspeicher). „Jetzt prüfen“ fragt GitHub jetzt immer sofort.
 - Behoben: Die Lynis-Paketquelle des Herstellers scheiterte mit „NO_PUBKEY“, weil die Schlüsseldatei nur für root
   lesbar war – apt prüft Signaturen aber als Benutzer _apt.
+- Behoben: „sudo lynis show details TEST-ID“ fand kein Protokoll. ubusec legt Lynis-Protokoll und -Bericht jetzt
+  zusätzlich an den Standardort (/var/log/lynis.log, /var/log/lynis-report.dat).
 - Lynis-Paketquelle: Fehlt der Signaturschlüssel trotzdem (z. B. nach einem Schlüsselwechsel bei CISOfy), holt ubusec den fehlenden Signaturschlüssel vom Ubuntu-Keyserver – aber nur, wenn er zum selben
   Hauptschlüssel gehört wie die Schlüsseldatei von cisofy.com. Klappt das nicht, wird die Quelle wieder entfernt,
   damit „apt update“ und die automatischen Sicherheitsupdates fehlerfrei bleiben.

@@ -330,11 +330,14 @@ mod_config() {
   if need lynis config lynis; then
     lynis audit system --cronjob --no-colors --quiet \
       --report-file "$RAW/lynis-report.dat" --logfile "$RAW/lynis.log" >"$RAW/lynis.out" 2>&1
+    # auch an den Standardort legen, damit „lynis show details TEST-ID“ funktioniert
+    [ -s "$RAW/lynis.log" ] && install -m 0640 "$RAW/lynis.log" /var/log/lynis.log
+    [ -s "$RAW/lynis-report.dat" ] && install -m 0640 "$RAW/lynis-report.dat" /var/log/lynis-report.dat
     local hi line id txt
     hi=$(awk -F= '/^hardening_index=/{print $2; exit}' "$RAW/lynis-report.dat" 2>/dev/null)
     while IFS= read -r line; do
       id=${line%%|*}; txt=${line#*|}; txt=${txt%%|*}
-      add MITTEL config "Lynis-Warnung: $txt [$id]" "Details: lynis show details $id"
+      add MITTEL config "Lynis-Warnung: $txt [$id]" "Details: sudo lynis show details $id"
     done < <(sed -n 's/^warning\[\]=//p' "$RAW/lynis-report.dat" 2>/dev/null)
     sed -n 's/^suggestion\[\]=//p' "$RAW/lynis-report.dat" 2>/dev/null \
       | awk -F'|' '{print $2" ["$1"]"}' >"$RAW/lynis-suggestions.txt"
