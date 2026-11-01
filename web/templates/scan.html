@@ -18,7 +18,14 @@
 {% if status.running or status.queued %}
   {{ ui.progress(status) }}
 {% elif status.aborted %}
-  <section class="done-box aborted-box"><p>Der letzte Scan wurde abgebrochen und hat keinen Bericht erzeugt. Du kannst ihn unten neu starten.</p></section>
+  <section class="done-box aborted-box">
+    <p><b>Der letzte Scan wurde abgebrochen</b>{% if status.updated %} ({{ status.updated | dt }}){% endif %}{% if status.module_title %}, im Bereich „{{ status.module_title }}“{% if status.sub_total %} bei Datei {{ status.sub_done }} von {{ status.sub_total }}{% endif %}{% endif %}.</p>
+    {% if status.abort_reason %}<p>Grund: {{ status.abort_reason }}</p>{% endif %}
+    {% if status.abort_reason and 'Arbeitsspeicher' in status.abort_reason %}
+    <p class="muted small">Tipp: Unter <a href="{{ url_for('settings') }}#scan">Einstellungen → Scan-Einstellungen</a> weniger parallele Virenscan-Prozesse wählen.</p>
+    {% endif %}
+    <p class="muted small">Ein abgebrochener Scan erzeugt keinen Bericht. Du kannst ihn unten neu starten.</p>
+  </section>
 {% else %}
   <section class="done-box" id="done-box" {% if not status.report %}hidden{% endif %}>
     {% if status.report %}

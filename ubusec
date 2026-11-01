@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.4.0"
+UBUSEC_VERSION="1.4.1"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -155,12 +155,22 @@ local_mounts() {
 }
 
 # Abbruch (systemctl stop, Strg+C, „Scan abbrechen“ in der Weboberfläche)
-on_abort() {
+on_abort() { # on_abort SIGNAL
   trap - INT TERM HUP EXIT
   pkill -TERM -P $$ 2>/dev/null          # laufendes Werkzeug (z. B. clamscan) mit beenden
-  write_status false "" 0 0 130 ""
-  [ -n "${LOG_DIR:-}" ] && printf '%s Scan abgebrochen (%s, PID %s)\n' "$(date '+%F %T')" "${MODE_LABEL:-$MODE}" "$$" >>"$LOG_DIR/web-audit.log"
-  log "ubusec: Scan abgebrochen."
+  local el=$(( $(date +%s) - ${T0:-0} )) limit=50400
+  [ "$TRIGGER" = timer ] && [ "$MODE" = quick ] && limit=21600
+  if [ -f "$STATE_DIR/cancel-requested" ]; then
+    ABORT_REASON="Abbruch durch Benutzer in der Weboberfläche"; rm -f "$STATE_DIR/cancel-requested"
+  elif [ "${1:-}" = INT ]; then ABORT_REASON="Abbruch auf der Kommandozeile (Strg+C)"
+  elif [ "${1:-}" = HUP ]; then ABORT_REASON="Sitzung beendet (Terminal geschlossen)"
+  elif systemctl is-system-running 2>/dev/null | grep -q stopping; then ABORT_REASON="Server wurde heruntergefahren oder neu gestartet"
+  elif (( el >= limit - 120 )); then ABORT_REASON="Zeitlimit überschritten ($(( limit / 3600 )) Stunden)"
+  else ABORT_REASON="Von außen beendet (z. B. systemctl stop)"; fi
+  [ "$CUR_MOD" = malware ] && [ -n "${RAW:-}" ] && SUB_DONE=$(cat "$RAW"/clam.out.* 2>/dev/null | wc -l)
+  write_status false "$CUR_MOD" "$MOD_I" "$MOD_N" 130 ""
+  [ -n "${LOG_DIR:-}" ] && printf '%s Scan abgebrochen (%s, PID %s): %s\n' "$(date '+%F %T')" "${MODE_LABEL:-$MODE}" "$$" "$ABORT_REASON" >>"$LOG_DIR/web-audit.log"
+  log "ubusec: Scan abgebrochen – $ABORT_REASON"
   exit 130
 }
 
@@ -181,14 +191,14 @@ ensure_dirs() {
 }
 
 # Statusdatei für die Weboberfläche (atomar geschrieben)
-SUB_DONE=0; SUB_TOTAL=0; SUB_TEXT=""; SUB_START=0
+SUB_DONE=0; SUB_TOTAL=0; SUB_TEXT=""; SUB_START=0; ABORT_REASON=""; CUR_MOD=""; MOD_I=0; MOD_N=0
 write_status() { # write_status running modul index total [exitcode report]
   local f=$STATE_DIR/status.json t="" st
   [ -n "$2" ] && t=${MOD_TITLE[$2]:-}
   st=${SUB_TEXT//[\\\"]/_}; st=${st//[$'\t\n\r']/ }
-  printf '{"running":%s,"mode":"%s","label":"%s","module":"%s","module_title":"%s","index":%s,"total":%s,"started":%s,"updated":%s,"trigger":"%s","exit":%s,"report":"%s","pid":%s,"sub_done":%s,"sub_total":%s,"sub_text":"%s","sub_start":%s}\n' \
+  printf '{"running":%s,"mode":"%s","label":"%s","module":"%s","module_title":"%s","index":%s,"total":%s,"started":%s,"updated":%s,"trigger":"%s","exit":%s,"report":"%s","pid":%s,"sub_done":%s,"sub_total":%s,"sub_text":"%s","sub_start":%s,"abort_reason":"%s"}\n' \
     "$1" "$MODE" "${MODE_LABEL:-}" "$2" "$t" "$3" "$4" "${T0:-0}" "$(date +%s)" "$TRIGGER" "${5:-null}" "${6:-}" "$$" \
-    "${SUB_DONE:-0}" "${SUB_TOTAL:-0}" "$st" "${SUB_START:-0}" >"$f.tmp"
+    "${SUB_DONE:-0}" "${SUB_TOTAL:-0}" "$st" "${SUB_START:-0}" "${ABORT_REASON//\"/\'}" >"$f.tmp"
   chgrp "$(grp)" "$f.tmp" 2>/dev/null; chmod 640 "$f.tmp"; mv -f "$f.tmp" "$f"
 }
 
@@ -747,13 +757,17 @@ clam_excludes() {
 
 # Anzahl paralleler clamscan-Prozesse (je ca. 1,5 GB Arbeitsspeicher)
 clam_auto_workers() {
-  local cpus mem n bymem
+  # je Prozess ca. 1,6 GB; höchstens so viel, wie frei ist (minus 2 GB Reserve) und wie die
+  # Speichergrenze der Scan-Dienste (40 % des Arbeitsspeichers) zulässt
+  local cpus tot avail budget cap n
   cpus=$(nproc 2>/dev/null || echo 1)
-  mem=$(awk '/^MemAvailable:/{print int($2/1048576)}' /proc/meminfo 2>/dev/null); mem=${mem:-2}
-  n=$(( cpus > 2 ? cpus - 1 : 1 ))
-  bymem=$(( (mem - 2) * 10 / 16 )); (( bymem < 1 )) && bymem=1
-  (( n > bymem )) && n=$bymem
+  read -r tot avail < <(awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print int(t/1024), int(a/1024)}' /proc/meminfo)
+  budget=$(( ${avail:-2048} - 2048 )); cap=$(( ${tot:-2048} * 40 / 100 - 1024 ))
+  (( budget > cap )) && budget=$cap
+  n=$(( budget / 1600 ))
+  (( n > cpus - 1 )) && n=$(( cpus - 1 ))
   (( n > 6 )) && n=6
+  (( n < 1 )) && n=1
   echo "$n"
 }
 clam_workers() { if [ "${CLAM_PARALLEL:-0}" -gt 0 ] 2>/dev/null; then echo "$CLAM_PARALLEL"; else clam_auto_workers; fi; }
@@ -797,19 +811,40 @@ mod_malware() {
   split -n "r/$n" -d -a 2 "$RAW/clam.list" "$RAW/clam.chunk."
   SUB_TOTAL=$total; SUB_DONE=0; SUB_TEXT=""; SUB_START=$(date +%s); write_status true malware "$MOD_I" "$MOD_N"
   log "   ClamAV prüft $total Dateien mit $n Prozess(en) …"
-  local pids=() c id
+  local pids=() ids=() c id
   for c in "$RAW"/clam.chunk.*; do
     [ -s "$c" ] || continue
     id=${c##*.}
     nice -n 19 ionice -c3 clamscan --no-summary --max-filesize="$CLAM_MAX_FILESIZE" --max-scansize=400M \
       -f "$c" >"$RAW/clam.out.$id" 2>"$RAW/clam.err.$id" &
-    pids+=($!)
+    pids+=($!); ids+=("$id")
   done
   clam_progress & local prog=$!
 
   # 3. Warten und Ergebnisse auswerten (Abbruch per Signal greift hier sofort)
-  local rc=0 r pid
-  for pid in "${pids[@]}"; do r=0; wait "$pid" || r=$?; (( r > rc )) && rc=$r; done
+  local rc=0 r i killed=() retried=0
+  for i in "${!pids[@]}"; do
+    r=0; wait "${pids[$i]}" || r=$?
+    if (( r > 128 )); then killed+=("${ids[$i]}"); elif (( r > rc )); then rc=$r; fi
+  done
+  # Teil-Scans, die das System beendet hat (meist Speichermangel): fehlende Dateien mit
+  # einem einzelnen Prozess nachholen, wenn die anderen fertig sind und Speicher frei ist
+  if (( ${#killed[@]} > 0 )); then
+    : >"$RAW/clam.retry"
+    for id in "${killed[@]}"; do
+      awk 'NR==FNR { sub(/: [^:]*$/, ""); done[$0] = 1; next } !($0 in done)' \
+        "$RAW/clam.out.$id" "$RAW/clam.chunk.$id" >>"$RAW/clam.retry"
+    done
+    retried=$(wc -l <"$RAW/clam.retry")
+    log "   ${#killed[@]} Teil-Scan(s) vom System beendet – prüfe $retried Dateien einzeln nach …"
+    SUB_TEXT="Hole $retried Dateien nach …"
+    r=0
+    nice -n 19 ionice -c3 clamscan --no-summary --max-filesize="$CLAM_MAX_FILESIZE" --max-scansize=400M \
+      -f "$RAW/clam.retry" >"$RAW/clam.out.retry" 2>"$RAW/clam.err.retry" &
+    wait $! || r=$?
+    (( r > rc )) && rc=$r
+    rm -f "$RAW/clam.retry"
+  fi
   kill "$prog" 2>/dev/null; wait "$prog" 2>/dev/null
   SUB_DONE=$(cat "$RAW"/clam.out.* 2>/dev/null | wc -l); write_status true malware "$MOD_I" "$MOD_N"
   cat "$RAW"/clam.out.* 2>/dev/null | grep ' FOUND$' | sed 's/ FOUND$//' >"$RAW/clam-hits.txt"
@@ -828,6 +863,11 @@ mod_malware() {
       "Geprüft: $SUB_DONE von $total Dateien" "Log: $RAW/clamscan.err"
   elif (( hits == 0 )); then
     add INFO malware "ClamAV: keine Funde in $total Dateien"
+  fi
+  if (( ${#killed[@]} > 0 )); then
+    add NIEDRIG malware "Virenscan-Prozesse wegen Speichermangel beendet – Dateien wurden nachgeholt" \
+      "${#killed[@]} von $n Prozessen vom System beendet, $retried Dateien einzeln nachgeprüft" \
+      "Empfehlung: Einstellungen → Scan-Einstellungen → weniger parallele Virenscan-Prozesse"
   fi
   local ex=0
   while IFS= read -r e; do
@@ -1102,6 +1142,12 @@ ExecStart=$INSTALL_PATH --quick --quiet --trigger timer
 Nice=19
 IOSchedulingClass=idle
 CPUWeight=20
+# Speicherschutz: Scans dürfen höchstens 40 % des Arbeitsspeichers belegen. Wird es eng,
+# trifft es den Scanner (nicht Webserver oder Datenbank), und ein beendeter Teilprozess
+# bricht nicht den ganzen Scan ab.
+MemoryMax=40%
+OOMScoreAdjust=500
+OOMPolicy=continue
 TimeoutStartSec=6h
 EOF
   cat >/etc/systemd/system/ubusec-quick.timer <<'EOF'
@@ -1535,6 +1581,7 @@ process_queue() { # process_queue req|ctl
         audit "ZEITPLAN $user: Schnell ${QUICK_ON}/${QUICK_DAYS}/${QUICK_TIME}, Voll ${FULL_ON}/${FULL_DAYS}/${FULL_TIME}" ;;
       cancel)
         audit "SCAN ABBRECHEN angefordert von $user"
+        touch "$STATE_DIR/cancel-requested"
         systemctl stop ubusec-queue.service ubusec-quick.service ubusec-full.service 2>/dev/null
         # auf der Kommandozeile gestartete Scans: PID aus der (root-eigenen) Statusdatei
         local spid
@@ -1622,6 +1669,13 @@ Type=oneshot
 ExecStart=$INSTALL_PATH --from-queue
 Nice=19
 IOSchedulingClass=idle
+CPUWeight=20
+# Speicherschutz: Scans dürfen höchstens 40 % des Arbeitsspeichers belegen. Wird es eng,
+# trifft es den Scanner (nicht Webserver oder Datenbank), und ein beendeter Teilprozess
+# bricht nicht den ganzen Scan ab.
+MemoryMax=40%
+OOMScoreAdjust=500
+OOMPolicy=continue
 TimeoutStartSec=14h
 EOF
   cat >/etc/systemd/system/ubusec-ctl.path <<EOF
@@ -1817,8 +1871,8 @@ main() {
   REPORT_JSON=$LOG_DIR/report-$TS-$MODE.json
   load_ignores; load_prev
   write_settings_json
-  trap 'write_status false "" 0 0 99 ""' EXIT
-  trap on_abort INT TERM HUP
+  trap 'ABORT_REASON="Programmfehler – Details: journalctl -t ubusec bzw. Ausgabe auf der Kommandozeile"; write_status false "$CUR_MOD" "$MOD_I" "$MOD_N" 99 ""' EXIT
+  trap 'on_abort INT' INT; trap 'on_abort TERM' TERM; trap 'on_abort HUP' HUP
 
   local m
   RUN_MODULES=$QUICK_MODULES; MODE_LABEL="Schnellscan"
@@ -1839,7 +1893,7 @@ main() {
   for m in $RUN_MODULES; do
     i=$((i+1)); t=$(date +%s)
     log "[$i/$total] ${MOD_TITLE[$m]} …"
-    MOD_I=$i; MOD_N=$total; SUB_DONE=0; SUB_TOTAL=0; SUB_TEXT=""; SUB_START=0
+    CUR_MOD=$m; MOD_I=$i; MOD_N=$total; SUB_DONE=0; SUB_TOTAL=0; SUB_TEXT=""; SUB_START=0
     write_status true "$m" "$i" "$total"
     "mod_$m"
     MOD_TIME[$m]=$(( $(date +%s) - t ))

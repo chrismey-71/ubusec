@@ -230,6 +230,7 @@ progress::-moz-progress-bar { background: var(--action); }
 .done-box { border-left: 4px solid var(--ok); background: var(--surface); padding: .8rem 1rem; border-radius: 0 6px 6px 0; margin: 1rem 0; }
 .done-box p { margin: 0; }
 .aborted-box { border-left-color: var(--mittel); }
+.aborted-box p + p { margin-top: .35rem; }
 .cancel-form { margin-top: .6rem; }
 .pg-sub { border-top: 1px solid var(--line); margin-top: .8rem; padding-top: .8rem; }
 .pg-sub progress { height: .45rem; }

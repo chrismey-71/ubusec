@@ -28,7 +28,7 @@ Neueste Version unter [Releases](https://github.com/chrismey-71/ubusec/releases)
 prüfen und installieren (Versionsnummer anpassen):
 
 ```bash
-VER=1.4.0
+VER=1.4.1
 curl -fLO https://github.com/chrismey-71/ubusec/releases/download/v$VER/ubusec-$VER.tar.gz
 curl -fLO https://github.com/chrismey-71/ubusec/releases/download/v$VER/SHA256SUMS
 sha256sum -c SHA256SUMS
@@ -164,6 +164,10 @@ ubusec erstellt zuerst eine Liste aller zu prüfenden Dateien und verteilt sie a
 clamscan-Prozesse. Jeder Prozess nutzt einen Prozessorkern und etwa 1,5 GB Arbeitsspeicher;
 „Automatisch“ wählt die Anzahl passend zu Kernen und freiem Speicher (höchstens 6). Alle laufen
 mit niedrigster Priorität, Websites haben immer Vorrang.
+
+Die Scan-Dienste dürfen höchstens 40 % des Arbeitsspeichers belegen. Wird der Speicher knapp, trifft es
+den Scanner und nicht Webserver oder Datenbank; ein vom System beendeter Teilprozess bricht den Scan nicht
+ab, seine Dateien werden danach einzeln nachgeholt.
 
 Die Fortschrittsanzeige zeigt „Datei X von Y“, die geschätzte Restzeit und den Ordner, der gerade
 geprüft wird.

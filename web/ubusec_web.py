@@ -326,6 +326,30 @@ def raw_files(r):
         return []
 
 
+SYSTEMD_RESULT = {
+    "oom-kill": "Arbeitsspeicher voll – das System hat den Scan beendet",
+    "timeout": "Zeitlimit überschritten",
+    "signal": "Von außen beendet",
+    "core-dump": "Programmabsturz",
+    "exit-code": "Programmfehler",
+    "watchdog": "Zeitüberwachung von systemd",
+}
+
+
+def systemd_abort_reason():
+    """Grund für einen harten Abbruch, den ubusec selbst nicht mehr eintragen konnte."""
+    try:
+        r = subprocess.run(["systemctl", "show", "ubusec-queue.service", "ubusec-full.service", "ubusec-quick.service",
+                            "-p", "Id", "-p", "Result"], capture_output=True, text=True, timeout=5)
+    except Exception:
+        return ""
+    for block in r.stdout.strip().split("\n\n"):
+        kv = dict(l.split("=", 1) for l in block.splitlines() if "=" in l)
+        if kv.get("Result") in SYSTEMD_RESULT:
+            return "%s (%s)" % (SYSTEMD_RESULT[kv["Result"]], kv.get("Id", ""))
+    return "Grund unbekannt – vermutlich Neustart des Servers oder hartes Beenden"
+
+
 def boot_time():
     try:
         for line in open("/proc/stat"):
@@ -357,8 +381,10 @@ def read_status():
         if not alive or time.time() - st.get("updated", 0) > 16 * 3600 or st.get("updated", 0) < boot_time():
             st["running"] = False
             st["aborted"] = True
-    elif st.get("exit") == 130:
+    elif st.get("exit") in (130, 99):
         st["aborted"] = True
+    if st.get("aborted") and not st.get("abort_reason"):
+        st["abort_reason"] = systemd_abort_reason()
     try:
         names = os.listdir(QUEUE_DIR)
         st["queued"] = any(n.endswith(".req") for n in names)
