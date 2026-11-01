@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Berichte{% endblock %}
+{% block content %}
+<h1>Berichte</h1>
+{% if not reports %}
+  <p class="empty-line">Noch keine Berichte. <a href="{{ url_for('scan') }}">Ersten Scan starten</a></p>
+{% else %}
+<div class="table-wrap">
+<table class="reports">
+  <thead><tr><th>Zeitpunkt</th><th>Art</th><th>Ausgelöst</th><th>Dauer</th><th>Befunde</th><th class="num">Wert</th></tr></thead>
+  <tbody>
+  {% for r in reports %}
+    <tr>
+      <td><a href="{{ url_for('report', rid=r.id) }}">{{ r.started | dt }}</a></td>
+      <td>{{ r.label }}</td>
+      <td>{{ {'timer': 'Zeitplan', 'web': 'Weboberfläche', 'manual': 'Kommandozeile'}.get(r.trigger, r.trigger) }}</td>
+      <td>{{ (r.finished - r.started) | dur }}</td>
+      <td><span class="mini">{% for s in SEVERITIES if s != 'INFO' and r.counts[s] %}<i class="sev-{{ s|lower }}" title="{{ SEV_NAME[s] }}">{{ r.counts[s] }}</i>{% else %}<span class="muted">keine</span>{% endfor %}</span></td>
+      <td class="num">{{ r.score }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted small">Berichte werden nach der in /etc/ubusec/ubusec.conf eingestellten Frist automatisch gelöscht (Standard: 60 Tage).</p>
+{% endif %}
+{% endblock %}

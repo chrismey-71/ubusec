@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen{% endblock %}
+{% block content %}
+<h1>Einstellungen</h1>
+
+{% if status.ctl_pending %}
+<p class="flash flash-info" id="ctl-pending" data-pending="1">Änderungen werden auf dem Server übernommen … die Seite aktualisiert sich gleich.</p>
+{% endif %}
+
+<nav class="subnav" aria-label="Bereiche der Einstellungen">
+  <a href="#konto">Mein Konto</a>
+  <a href="#benutzer">Benutzer</a>
+  <a href="#zeitplan">Geplante Scans</a>
+  <a href="#benachrichtigung">Benachrichtigungen</a>
+  <a href="#scan">Scan-Einstellungen</a>
+  <a href="#fehlalarme">Fehlalarme</a>
+  <a href="#protokoll">Protokoll</a>
+</nav>
+
+{# ------------------------------------------------------------ Konto #}
+<section class="setting" id="konto">
+  <h2>Mein Konto</h2>
+  <div class="setting-grid">
+    <form method="post" action="{{ url_for('change_pw') }}" class="stack">
+      <h3>Passwort ändern</h3>
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Aktuelles Passwort <input type="password" name="current" autocomplete="current-password" required></label>
+      <label>Neues Passwort <input type="password" name="new" autocomplete="new-password" minlength="12" required>
+        <small class="muted">Mindestens 12 Zeichen. Ein Satz aus mehreren Wörtern ist sicher und gut zu merken.</small></label>
+      <label>Neues Passwort wiederholen <input type="password" name="new2" autocomplete="new-password" minlength="12" required></label>
+      <button class="btn">Passwort ändern</button>
+    </form>
+
+    <div class="stack">
+      <h3>Zwei-Faktor-Anmeldung</h3>
+      {% if me.totp %}
+        <p class="ok-line">Aktiv – bei der Anmeldung ist ein Code aus der Authenticator-App nötig.</p>
+        <details class="danger-zone">
+          <summary>Zwei-Faktor ausschalten oder neu einrichten</summary>
+          <form method="post" action="{{ url_for('totp_start') }}" class="stack">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <p class="muted small">Neues Handy? Richte die App neu ein – der alte Code wird danach ungültig.</p>
+            <label>Passwort <input type="password" name="current" autocomplete="current-password" required></label>
+            <button class="btn btn-quiet">Neu einrichten</button>
+          </form>
+          <form method="post" action="{{ url_for('totp_off') }}" class="stack">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <label>Passwort <input type="password" name="current" autocomplete="current-password" required></label>
+            <label>Aktueller Code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required></label>
+            <button class="btn btn-quiet">Zwei-Faktor ausschalten</button>
+          </form>
+        </details>
+      {% else %}
+        <p class="warn-line">Nicht aktiv. Ohne zweiten Faktor genügt ein erratenes oder gestohlenes Passwort, um Scans und Einstellungen zu steuern.</p>
+        <form method="post" action="{{ url_for('totp_start') }}" class="stack">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <label>Passwort zur Bestätigung <input type="password" name="current" autocomplete="current-password" required></label>
+          <button class="btn btn-primary">Zwei-Faktor einrichten</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+{# ---------------------------------------------------------- Benutzer #}
+<section class="setting" id="benutzer">
+  <h2>Benutzer</h2>
+  <p class="muted">Alle Benutzer haben dieselben Rechte: Scans starten, Berichte sehen, Einstellungen ändern.</p>
+  <ul class="userlist">
+    {% for u in users %}
+    <li>
+      <span><b>{{ u }}</b>{% if u == user %} <span class="muted">(du)</span>{% endif %}</span>
+      {% if u != user %}
+      <form method="post" action="{{ url_for('user_del', name=u) }}" class="inline-form">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="password" name="current" placeholder="Dein Passwort" autocomplete="current-password" required aria-label="Dein Passwort zur Bestätigung">
+        <button class="btn btn-quiet" data-confirm="Benutzer {{ u }} wirklich löschen?">Löschen</button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <details class="add-user">
+    <summary>Benutzer hinzufügen</summary>
+    <form method="post" action="{{ url_for('user_add') }}" class="stack narrow">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Benutzername <input name="name" maxlength="32" pattern="[A-Za-z0-9._\-]{1,32}" required></label>
+      <label>Startpasswort <input type="password" name="password" minlength="12" autocomplete="new-password" required></label>
+      <label>Dein Passwort zur Bestätigung <input type="password" name="current" autocomplete="current-password" required></label>
+      <button class="btn">Benutzer anlegen</button>
+    </form>
+  </details>
+</section>
+
+{# ---------------------------------------------------------- Zeitplan #}
+<section class="setting" id="zeitplan">
+  <h2>Geplante Scans</h2>
+  <form method="post" action="{{ url_for('save_schedule') }}" class="schedule">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% for key, title, text in [('QUICK', 'Schnellscan', 'Updates, CVEs, Firewall, Integrität, Baseline, Rootkits, Virenscan der wichtigsten Ordner'),
+                                ('FULL', 'Vollscan', 'Alle Bereiche inklusive Websites, Webanwendungen und Virenscan über das ganze System')] %}
+    {% set days = (conf.get(key ~ '_DAYS') or '').split(',') %}
+    <fieldset class="sched">
+      <legend>{{ title }}</legend>
+      <label class="check"><input type="checkbox" name="{{ key }}_ON" {% if conf.get(key ~ '_ON', '1') == '1' %}checked{% endif %}> <span>Automatisch ausführen</span></label>
+      <p class="muted small">{{ text }}</p>
+      <div class="days" role="group" aria-label="Wochentage {{ title }}">
+        {% for d, n in DAYS %}
+        <label class="day"><input type="checkbox" name="{{ key }}_{{ d }}" {% if d in days %}checked{% endif %}><span>{{ n }}</span></label>
+        {% endfor %}
+      </div>
+      <label class="time">Uhrzeit <input type="time" name="{{ key }}_TIME" value="{{ conf.get(key ~ '_TIME', '03:17') }}" required></label>
+    </fieldset>
+    {% endfor %}
+    <p class="muted small">Tipp: Zeiten wie 03:17 statt 03:00 vermeiden, dass viele Aufgaben auf dem Server gleichzeitig starten. Die Scans laufen mit niedriger Priorität.</p>
+    <button class="btn">Zeitplan speichern</button>
+  </form>
+</section>
+
+{# ------------------------------------------------- Benachrichtigungen #}
+<section class="setting" id="benachrichtigung">
+  <h2>Benachrichtigungen</h2>
+  <form method="post" action="{{ url_for('save_notify') }}" class="stack narrow">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>E-Mail-Adresse
+      <input name="MAIL_TO" value="{{ conf.MAIL_TO }}" placeholder="name@beispiel.at" autocomplete="email">
+      <small class="muted">Mehrere Adressen mit Komma trennen.{% if not conf._mailer %} <span class="warn-text">Auf dem Server ist noch kein Mailprogramm installiert: <code>sudo apt install bsd-mailx</code></span>{% endif %}</small>
+    </label>
+    <label>Push-Nachricht aufs Handy (ntfy)
+      <input name="NTFY_URL" value="{{ conf.NTFY_URL }}" placeholder="https://ntfy.sh/ein-langer-geheimer-name">
+      <small class="muted">Kostenlose App „ntfy“ installieren, einen schwer erratbaren Themennamen abonnieren und die Adresse hier eintragen.</small>
+    </label>
+    <label>Benachrichtigen ab
+      <select name="NOTIFY_MIN">
+        {% for v, n in [('KRITISCH', 'Kritisch'), ('HOCH', 'Hoch (empfohlen)'), ('MITTEL', 'Mittel')] %}
+        <option value="{{ v }}" {% if conf.get('NOTIFY_MIN', 'HOCH') == v %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" name="NOTIFY_ONLY_NEW" {% if conf.get('NOTIFY_ONLY_NEW', '1') == '1' %}checked{% endif %}>
+      <span>Nur bei neuen Meldungen benachrichtigen<br><small class="muted">Sonst kommt jede Nacht dieselbe Nachricht, bis das Problem behoben ist.</small></span></label>
+    <div class="row-actions">
+      <button class="btn">Speichern</button>
+    </div>
+  </form>
+  <form method="post" action="{{ url_for('test_notify') }}" class="test-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn btn-quiet" {% if not conf.MAIL_TO and not conf.NTFY_URL %}disabled{% endif %}>Testnachricht senden</button>
+    {% if test %}<span class="{{ 'ok-text' if test.ok else 'warn-text' }}">Letzter Test {{ test.time | ago }}: {{ test.message }}</span>{% endif %}
+  </form>
+</section>
+
+{# --------------------------------------------------- Scan-Einstellungen #}
+<section class="setting" id="scan">
+  <h2>Scan-Einstellungen</h2>
+  <form method="post" action="{{ url_for('save_scan') }}" class="stack narrow">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <h3>Allgemein</h3>
+    <label>Berichte aufbewahren (Tage)
+      <input type="number" name="KEEP_DAYS" min="7" max="365" value="{{ conf.get('KEEP_DAYS', '60') }}" required></label>
+    <h3>Virenscan</h3>
+    <label>Ordner für den Virenscan beim Schnellscan
+      <input name="CLAM_PATHS_QUICK" value="{{ conf.CLAM_PATHS_QUICK }}">
+      <small class="muted">Mit Leerzeichen getrennt. Beim Vollscan wird immer das ganze System durchsucht.</small></label>
+    <label>Größte geprüfte Datei
+      <select name="CLAM_MAX_FILESIZE">
+        {% for v in ['25M', '50M', '100M', '200M', '400M'] %}<option value="{{ v }}" {% if conf.get('CLAM_MAX_FILESIZE', '100M') == v %}selected{% endif %}>{{ v[:-1] }} MB</option>{% endfor %}
+      </select></label>
+    <label>Parallele Virenscan-Prozesse
+      <select name="CLAM_PARALLEL">
+        <option value="0" {% if conf.get('CLAM_PARALLEL', '0') == '0' %}selected{% endif %}>Automatisch (derzeit {{ conf._auto_parallel or 1 }})</option>
+        {% for n in range(1, 9) %}<option value="{{ n }}" {% if conf.get('CLAM_PARALLEL') == n|string %}selected{% endif %}>{{ n }}</option>{% endfor %}
+      </select>
+      <small class="muted">Jeder Prozess nutzt einen Prozessorkern und etwa 1,5 GB Arbeitsspeicher.
+        Dieser Server: {{ conf._cpus or '?' }} Kerne, {{ conf._mem_gb or '?' }} GB. Die Scans laufen mit niedrigster Priorität, Websites haben immer Vorrang.</small></label>
+    <fieldset class="excl">
+      <legend>Vom Virenscan ausnehmen</legend>
+      <label class="check"><input type="checkbox" name="CLAM_EXCLUDE_DB" {% if conf.get('CLAM_EXCLUDE_DB', '1') == '1' %}checked{% endif %}>
+        <span>Datenbankdateien<br><small class="muted">/var/lib/mysql, /var/lib/postgresql … – Viren werden dort nicht ausgeführt, die Dateien sind groß und ändern sich ständig.</small></span></label>
+      <label class="check"><input type="checkbox" name="CLAM_EXCLUDE_BACKUPS" {% if conf.get('CLAM_EXCLUDE_BACKUPS', '1') == '1' %}checked{% endif %}>
+        <span>Backup-Ordner<br><small class="muted">{% if conf._backup_dirs %}Gefunden: {{ conf._backup_dirs | join(', ') }}{% else %}/backup, /var/backups, ~/backups (derzeit keine gefunden){% endif %}</small></span></label>
+      <label class="check"><input type="checkbox" name="CLAM_EXCLUDE_LOGS" {% if conf.get('CLAM_EXCLUDE_LOGS', '1') == '1' %}checked{% endif %}>
+        <span>Protokolle<br><small class="muted">/var/log und die Protokollordner der Domains</small></span></label>
+      <label class="check"><input type="checkbox" name="CLAM_EXCLUDE_MAIL" {% if conf.CLAM_EXCLUDE_MAIL == '1' %}checked{% endif %}>
+        <span>Postfächer<br><small class="muted">Nur sinnvoll, wenn eingehende Mails schon beim Empfang auf Viren geprüft werden (Virtualmin: Spam- und Virenfilter der Domain).</small></span></label>
+      <label class="check"><input type="checkbox" name="CLAM_EXCLUDE_NEXTCLOUD" {% if conf.CLAM_EXCLUDE_NEXTCLOUD == '1' %}checked{% endif %}>
+        <span>Nextcloud-Datenordner<br><small class="muted">{% if conf._nc_datadirs %}Gefunden: {{ conf._nc_datadirs | join(', ') }}.{% else %}Derzeit keine Nextcloud gefunden.{% endif %}
+          Nur ausnehmen, wenn in Nextcloud die App „Antivirus for files“ aktiv ist – sie prüft jede Datei schon beim Hochladen.</small></span></label>
+      <label>Weitere Ordner ausnehmen
+        <input name="CLAM_EXCLUDE_CUSTOM" value="{{ conf.CLAM_EXCLUDE_CUSTOM }}" placeholder="/home/archiv /srv/videos">
+        <small class="muted">Vollständige Pfade, mit Leerzeichen getrennt.</small></label>
+    </fieldset>
+    <details class="hint-box">
+      <summary>So richtest du „Antivirus for files“ in Nextcloud ein</summary>
+      <ol>
+        <li>Auf dem Server den ClamAV-Dienst installieren: <code>sudo apt install clamav-daemon</code></li>
+        <li>In Nextcloud als Administrator: Apps → Sicherheit → „Antivirus for files“ aktivieren.</li>
+        <li>Verwaltung → Sicherheit → Antivirus: Modus „ClamAV Daemon (Unix Socket)“, Socket <code>/var/run/clamav/clamd.ctl</code>, Aktion bei infizierten Dateien „Datei löschen“ oder „Nur protokollieren“.</li>
+        <li>Testen: die Testdatei von eicar.org hochladen – Nextcloud muss sie ablehnen.</li>
+        <li>Danach hier „Nextcloud-Datenordner“ ankreuzen.</li>
+      </ol>
+    </details>
+    <h3>Updates</h3>
+    <label class="check"><input type="checkbox" name="UPDATE_CHECK" {% if conf.get('UPDATE_CHECK', '1') == '1' %}checked{% endif %}>
+      <span>Bei GitHub nach neuen ubusec-Versionen suchen<br><small class="muted">Höchstens alle sechs Stunden eine Anfrage an api.github.com, ohne Daten über deinen Server. Eingespielt wird nichts automatisch.</small></span></label>
+    <h3>Websites und Webanwendungen</h3>
+    <label>Webverzeichnisse
+      <input name="WEB_PATHS" value="{{ conf.WEB_PATHS }}">
+      <small class="muted">Zusätzlich zu den Verzeichnissen, die ubusec aus Virtualmin und Apache kennt.</small></label>
+    <label>Domains ausschließen
+      <input name="SITES_EXCLUDE" value="{{ conf.SITES_EXCLUDE }}" placeholder="alt.beispiel.at *.test.beispiel.at">
+      <small class="muted">Mit Leerzeichen getrennt, * als Platzhalter.</small></label>
+    <label>Zusätzliche Domains prüfen
+      <input name="SITES_EXTRA" value="{{ conf.SITES_EXTRA }}" placeholder="shop.beispiel.at">
+      <small class="muted">Für Domains, die nicht in Virtualmin angelegt sind.</small></label>
+    <label class="check"><input type="checkbox" name="SITES_TESTSSL" {% if conf.SITES_TESTSSL == '1' %}checked{% endif %}>
+      <span>Gründliche TLS-Prüfung mit testssl.sh beim Vollscan<br><small class="muted">Findet auch schwache Verschlüsselungsverfahren, dauert aber pro Domain ein bis zwei Minuten.</small></span></label>
+    <label>WPScan-API-Token (optional)
+      <input name="WPSCAN_API_TOKEN" type="password" autocomplete="off" placeholder="{{ 'gespeichert – zum Ändern neu eingeben' if conf.WPSCAN_API_TOKEN else 'kostenlos auf wpscan.com erhältlich' }}">
+      <small class="muted">Damit prüft ubusec WordPress-Plugins gegen eine Datenbank bekannter Sicherheitslücken (kostenlos: 25 Abfragen pro Tag).</small></label>
+    {% if conf.WPSCAN_API_TOKEN %}<label class="check"><input type="checkbox" name="token_remove"> <span>Gespeichertes Token entfernen</span></label>{% endif %}
+    <button class="btn">Scan-Einstellungen speichern</button>
+  </form>
+</section>
+
+{# ----------------------------------------------------------- Fehlalarme #}
+<section class="setting" id="fehlalarme">
+  <h2>Ausgeblendete Fehlalarme</h2>
+  {% if ignores is none %}
+    <p class="muted">Die Liste ist für die Weboberfläche nicht lesbar. Einmal <code>sudo ubusec --install --with-web</code> ausführen, um die Rechte zu korrigieren.</p>
+  {% elif not ignores %}
+    <p class="muted">Keine Meldungen ausgeblendet. In Berichten und Empfehlungen kannst du geprüfte Fehlalarme mit „Als Fehlalarm ausblenden“ hierher verschieben.</p>
+  {% else %}
+  <ul class="ignorelist">
+    {% for e in ignores %}
+    <li>
+      <div><code>{{ e.pattern }}</code>{% if e.note %}<br><span class="muted small">{{ e.note }}</span>{% endif %}</div>
+      <form method="post" action="{{ url_for('unignore') }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="pattern" value="{{ e.pattern }}">
+        <button class="btn btn-quiet">Wieder anzeigen</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+{# ------------------------------------------------------------ Protokoll #}
+<section class="setting" id="protokoll">
+  <h2>Protokoll</h2>
+  <div class="setting-grid">
+    <div>
+      <h3>Letzte Anmeldungen</h3>
+      <ul class="loglist">
+        {% for l in logins %}
+        <li class="{{ '' if l.ok else 'failed' }}"><span>{{ l.t | dt }}</span> <b>{{ l.user or '–' }}</b> <span class="muted">{{ l.ip }}</span>{% if not l.ok %} <span class="warn-text">fehlgeschlagen</span>{% endif %}</li>
+        {% else %}<li class="muted">Noch keine Einträge.</li>{% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h3>Aktionen über die Weboberfläche</h3>
+      <ul class="loglist mono">
+        {% for a in audit %}<li class="{{ 'failed' if 'ABGELEHNT' in a else '' }}">{{ a }}</li>{% else %}<li class="muted">Noch keine Einträge.</li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+</section>
+{% endblock %}

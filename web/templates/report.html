@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}{{ r.label }} {{ r.started | dt }}{% endblock %}
+{% block content %}
+<p class="crumb"><a href="{{ url_for('reports') }}">Berichte</a></p>
+<h1>{{ r.label }} vom {{ r.started | dt('%d.%m.%Y, %H:%M') }}</h1>
+<p class="lede">Dauer {{ (r.finished - r.started) | dur }}, ausgelöst {{ {'timer': 'per Zeitplan', 'web': 'über die Weboberfläche', 'manual': 'auf der Kommandozeile'}.get(r.trigger, r.trigger) }}.
+  Sicherheitswert {{ r.score }} von 100{% if r.lynis_index %}, Lynis-Härtungsindex {{ r.lynis_index }}{% endif %}.
+  {% if r.suppressed %}{{ r.suppressed }} Meldung(en) wurden als Fehlalarm ausgeblendet.{% endif %}
+  Erstellt mit ubusec {{ r.version or '?' }}{% if r.version and r.version != VERSION %} (installiert ist jetzt {{ VERSION }}){% endif %}.</p>
+
+{{ ui.strip(r.findings, r.id) }}
+{{ ui.counts(r.counts) }}
+
+<div class="filters" id="filters" hidden>
+  <span>Anzeigen:</span>
+  {% for s in SEVERITIES %}
+    <label class="chip"><input type="checkbox" value="{{ s }}" checked> {{ SEV_NAME[s] }}</label>
+  {% endfor %}
+  <label class="chip"><input type="checkbox" id="only-new"> nur neue</label>
+</div>
+
+{% for m in mods %}
+  {% set fs = r.findings | selectattr('module', 'equalto', m) | list %}
+  <section class="mod" data-mod="{{ m }}">
+    <div class="section-head">
+      <h2>{{ MOD_TITLE[m] }}</h2>
+      <span class="muted small">{{ r.modules[m] | dur }}</span>
+    </div>
+    {% for f in fs %}{{ ui.finding(f, r) }}{% else %}<p class="ok-line">Keine Auffälligkeiten.</p>{% endfor %}
+  </section>
+{% endfor %}
+
+<section class="downloads">
+  <h2>Herunterladen</h2>
+  <p><a href="{{ url_for('report_file', rid=r.id, fmt='txt') }}">Textbericht</a>
+     <a href="{{ url_for('report_file', rid=r.id, fmt='html') }}" target="_blank" rel="noopener">HTML-Bericht</a>
+     <a href="{{ url_for('report_file', rid=r.id, fmt='json') }}">JSON</a></p>
+  {% if raw_files %}
+  <details class="rawlist">
+    <summary>Rohdaten der Werkzeuge ({{ raw_files|length }} Dateien)</summary>
+    <ul>{% for n in raw_files %}<li><a href="{{ url_for('raw_file', rid=r.id, name=n) }}">{{ n }}</a></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+</section>
+{% endblock %}

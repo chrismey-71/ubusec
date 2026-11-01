@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Anmelden{% endblock %}
+{% block bare %}
+<div class="login">
+  <div class="login-mark">
+    <svg viewBox="0 0 32 32" width="44" height="44" aria-hidden="true"><path class="brand-shield" d="M16 2 4 6.5v8.7c0 7.3 5 13.4 12 14.8 7-1.4 12-7.5 12-14.8V6.5L16 2z"/><path class="brand-check" d="m10.5 16.2 3.8 3.8 7.2-7.6" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div>
+      <h1>ubusec</h1>
+      <p class="muted">Sicherheitsprüfung für {{ host }} · Version {{ VERSION }}</p>
+    </div>
+  </div>
+  {% if no_users %}
+    <p class="flash flash-info">Es ist noch kein Benutzer angelegt. Auf dem Server ausführen:</p>
+    <p class="cmdline"><code>sudo ubusec --web-user admin --totp</code></p>
+  {% else %}
+  <form method="post" class="stack">
+    <label>Benutzername
+      <input name="username" autocomplete="username" required autofocus maxlength="32">
+    </label>
+    <label>Passwort
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    {% if needs_code %}
+    <label>Code aus der Authenticator-App
+      <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" placeholder="6 Ziffern">
+      <small class="muted">Nur nötig, wenn für dein Konto die Zwei-Faktor-Anmeldung aktiv ist.</small>
+    </label>
+    {% endif %}
+    <button class="btn btn-primary">Anmelden</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}Übersicht{% endblock %}
+{% block content %}
+{% if status.queue_stuck %}
+<section class="stuck-box">
+  <h2>Scan-Auftrag wartet seit {{ status.queue_stuck }} Minuten</h2>
+  <p>Der Dienst, der Aufträge der Weboberfläche ausführt, reagiert nicht. Auf dem Server ausführen:</p>
+  <p class="cmdline"><code>sudo systemctl reset-failed ubusec-queue.service; sudo systemctl restart ubusec-queue.path</code><button type="button" class="copy" data-copy="sudo systemctl reset-failed ubusec-queue.service; sudo systemctl restart ubusec-queue.path">Kopieren</button></p>
+  <form method="post" action="{{ url_for('scan_cancel') }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn btn-quiet">Auftrag verwerfen</button>
+  </form>
+</section>
+{% endif %}
+{% if not last %}
+  <section class="empty">
+    <h1>Noch kein Bericht vorhanden</h1>
+    <p>Starte den ersten Vollscan. Er prüft alle zwölf Bereiche und legt die Baseline an, mit der spätere Scans neue Konten, Schlüssel oder Ports erkennen.</p>
+    <form method="post" action="{{ url_for('scan') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="kind" value="full">
+      <button class="btn btn-primary">Ersten Vollscan starten</button>
+    </form>
+  </section>
+{% else %}
+  <header class="verdict verdict-{{ verdict.level }}">
+    <h1>{{ verdict.headline }}</h1>
+    <p class="lede">{{ verdict.text }}</p>
+    {{ ui.strip(state.findings) }}
+    <div class="verdict-meta">
+      {{ ui.counts(state.counts) }}
+      <p class="score">Sicherheitswert <b>{{ state.score }}</b> von 100</p>
+    </div>
+  </header>
+
+  {% if status.running or status.queued %}{{ ui.progress(status) }}{% endif %}
+
+  {% set top = state.findings | rejectattr('severity', 'equalto', 'INFO') | list %}
+  {% if top %}
+  <section>
+    <div class="section-head">
+      <h2>Zuerst erledigen</h2>
+      <a href="{{ url_for('recommendations') }}">Alle {{ top|length }} Empfehlungen</a>
+    </div>
+    {% for f in top[:5] %}{{ ui.finding(f, state.sources[f.module]) }}{% endfor %}
+  </section>
+  {% endif %}
+
+  {% if state.missing %}
+  <p class="note">Noch nie geprüft: {{ state.missing | titles }}.
+    Ein <a href="{{ url_for('scan') }}">Vollscan</a> schließt diese Lücke.</p>
+  {% endif %}
+
+  <div class="cols">
+    <section>
+      <h2>Verlauf des Sicherheitswerts</h2>
+      {% if chart.points|length > 1 %}
+      <svg class="chart" viewBox="0 0 320 120" role="img" aria-label="Sicherheitswert der letzten {{ chart.points|length }} Scans">
+        <line class="grid" x1="30" x2="316" y1="10" y2="10"/><line class="grid" x1="30" x2="316" y1="55" y2="55"/><line class="grid" x1="30" x2="316" y1="100" y2="100"/>
+        <text class="axis" x="24" y="14" text-anchor="end">100</text><text class="axis" x="24" y="59" text-anchor="end">50</text><text class="axis" x="24" y="104" text-anchor="end">0</text>
+        <polyline class="line" points="{% for p in chart.points %}{{ p.x }},{{ p.y }} {% endfor %}"/>
+        {% for p in chart.points %}<a href="{{ url_for('report', rid=p.id) }}"><circle class="dot {{ p.cls }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ p.label }}: {{ p.score }}</title></circle></a>{% endfor %}
+        <text class="axis" x="30" y="117">{{ chart.first }}</text><text class="axis" x="316" y="117" text-anchor="end">{{ chart.last }}</text>
+      </svg>
+      <p class="muted small">Ausgefüllte Punkte sind Vollscans, Teilscans fließen nicht ein. Der Wert zieht pro Befund ab: kritisch 25, hoch 10, mittel 4, niedrig 1.</p>
+      {% else %}
+      <p class="muted">Der Verlauf erscheint ab dem zweiten Scan.</p>
+      {% endif %}
+    </section>
+    <section>
+      <h2>Geplante Scans</h2>
+      <dl class="timers">
+        {% for t in timers %}
+          <dt>{{ t.label }}</dt>
+          <dd>{% if t.active and t.next %}{{ t.next }}{% else %}<span class="muted">nicht eingeplant</span>{% endif %}</dd>
+        {% endfor %}
+      </dl>
+      <h2>Letzte Scans</h2>
+      <ul class="recent">
+        {% for r in reports %}
+        <li><a href="{{ url_for('report', rid=r.id) }}">{{ r.label }}</a>
+          <span class="muted">{{ r.finished | ago }}</span>
+          <span class="mini">{% for s in SEVERITIES if s != 'INFO' and r.counts[s] %}<i class="sev-{{ s|lower }}" title="{{ SEV_NAME[s] }}">{{ r.counts[s] }}</i>{% endfor %}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+{% endif %}
+{% endblock %}

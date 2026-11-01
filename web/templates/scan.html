@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}Scan starten{% endblock %}
+{% block content %}
+<h1>Scan starten</h1>
+{% if status.queue_stuck %}
+<section class="stuck-box">
+  <h2>Scan-Auftrag wartet seit {{ status.queue_stuck }} Minuten</h2>
+  <p>Der Dienst, der Aufträge der Weboberfläche ausführt, reagiert nicht. Auf dem Server ausführen:</p>
+  <p class="cmdline"><code>sudo systemctl reset-failed ubusec-queue.service; sudo systemctl restart ubusec-queue.path</code><button type="button" class="copy" data-copy="sudo systemctl reset-failed ubusec-queue.service; sudo systemctl restart ubusec-queue.path">Kopieren</button></p>
+  <form method="post" action="{{ url_for('scan_cancel') }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn btn-quiet">Auftrag verwerfen</button>
+  </form>
+</section>
+{% endif %}
+
+{% if status.running or status.queued %}
+  {{ ui.progress(status) }}
+{% elif status.aborted %}
+  <section class="done-box aborted-box"><p>Der letzte Scan wurde abgebrochen und hat keinen Bericht erzeugt. Du kannst ihn unten neu starten.</p></section>
+{% else %}
+  <section class="done-box" id="done-box" {% if not status.report %}hidden{% endif %}>
+    {% if status.report %}
+      <p>Der letzte Scan ist abgeschlossen{% if last %} ({{ last.finished | ago }}){% endif %}.
+      <a href="{{ url_for('report', rid=status.report[7:-5]) }}">Bericht ansehen</a></p>
+    {% endif %}
+  </section>
+{% endif %}
+
+<form method="post" class="scan-form" {% if status.running or status.queued %}aria-disabled="true"{% endif %}>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <fieldset class="kinds">
+    <legend>Art des Scans</legend>
+    <label class="kind">
+      <input type="radio" name="kind" value="quick" checked>
+      <span class="kind-title">Schnellscan</span>
+      <span class="kind-text">Updates, CVEs, Firewall, Integrität, Baseline, Rootkits und Virenscan der wichtigsten Ordner. Meist 5 bis 20 Minuten.</span>
+    </label>
+    <label class="kind">
+      <input type="radio" name="kind" value="full">
+      <span class="kind-title">Vollscan</span>
+      <span class="kind-text">Alle zwölf Bereiche mit Lynis-Audit, Dateiberechtigungen, Websites, Webanwendungen und Virenscan über das ganze System. Je nach Datenmenge eine bis mehrere Stunden.</span>
+    </label>
+    <label class="kind">
+      <input type="radio" name="kind" value="custom">
+      <span class="kind-title">Ausgewählte Bereiche</span>
+      <span class="kind-text">Nur die Bereiche, die du unten ankreuzt – etwa um nach einer Korrektur gezielt nachzuprüfen.</span>
+    </label>
+  </fieldset>
+
+  <fieldset class="modules" id="modules">
+    <legend>Bereiche</legend>
+    {% for m, title, desc in MODULES %}
+    <label class="check">
+      <input type="checkbox" name="m_{{ m }}" {% if m in QUICK %}checked{% endif %}>
+      <span><b>{{ title }}</b><br><span class="muted">{{ desc }}</span></span>
+    </label>
+    {% endfor %}
+    <label class="check deep">
+      <input type="checkbox" name="deep">
+      <span><b>Gründlich wie beim Vollscan</b><br><span class="muted">Virenscan über das ganze System, rkhunter-Update, Suche nach versteckten Prozessen</span></span>
+    </label>
+  </fieldset>
+
+  <button class="btn btn-primary" {% if status.running or status.queued %}disabled{% endif %}>Scan starten</button>
+</form>
+{% endblock %}

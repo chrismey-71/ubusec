@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Fehler {{ code }}{% endblock %}
+{% block content %}
+<h1>{% if code == 404 %}Nicht gefunden{% else %}Anfrage abgelehnt{% endif %}</h1>
+<p>{% if code == 404 %}Diese Seite oder dieser Bericht existiert nicht (mehr). Alte Berichte werden automatisch gelöscht.{% else %}{{ text }}{% endif %}</p>
+<p><a href="{{ url_for('dashboard') }}">Zur Übersicht</a></p>
+{% endblock %}
+{% block bare %}
+<h1>Fehler {{ code }}</h1><p>{{ text }}</p><p><a href="{{ url_for('login') }}">Zur Anmeldung</a></p>
+{% endblock %}

@@ -1,0 +1,47 @@
+# Baut bei jedem Versions-Tag (z. B. v1.4.0) das Installationspaket samt Prüfsumme
+# und veröffentlicht es als GitHub-Release. Die Release-Notizen stammen aus CHANGELOG.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versionsnummer prüfen
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VER=$(grep -m1 '^UBUSEC_VERSION=' ubusec | cut -d'"' -f2)
+          if [ "$TAG" != "$VER" ]; then
+            echo "Tag $TAG passt nicht zu UBUSEC_VERSION=$VER im Skript" >&2; exit 1
+          fi
+          echo "VER=$VER" >> "$GITHUB_ENV"
+
+      - name: Syntax prüfen
+        run: |
+          bash -n ubusec
+          python3 -m py_compile web/ubusec_web.py web/hints.py checks/webcheck.py
+
+      - name: Paket bauen
+        run: |
+          mkdir -p dist/ubusec
+          git archive HEAD | tar -x -C dist/ubusec
+          rm -rf dist/ubusec/.github dist/ubusec/.gitignore
+          tar czf "dist/ubusec-$VER.tar.gz" --owner=0 --group=0 -C dist ubusec
+          (cd dist && sha256sum "ubusec-$VER.tar.gz" > SHA256SUMS)
+          awk -v v="$VER" 'index($0, "## " v) == 1 {f = 1; next} /^## / && f {exit} f' CHANGELOG.md > notes.md
+          printf '\n---\nInstallation und Update: siehe README. Auf einem Server mit ubusec ≥ 1.4: `sudo ubusec --update`\n' >> notes.md
+
+      - name: Release veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "dist/ubusec-$VER.tar.gz" dist/SHA256SUMS \
+            --title "ubusec $VER" --notes-file notes.md

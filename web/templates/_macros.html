@@ -1,0 +1,84 @@
+{# Befundleiste: ein Feld pro offenem Befund, nach Schwere sortiert #}
+{% macro strip(findings, rid=None) %}
+  {% set open = findings | rejectattr('severity', 'equalto', 'INFO') | list %}
+  {% if open %}
+  <div class="strip" aria-label="{{ open|length }} offene Befunde">
+    {% for f in open %}<a class="cell sev-{{ f.severity|lower }}" href="#f-{{ f.report or rid }}-{{ f.idx }}" title="{{ SEV_NAME[f.severity] }}: {{ f.message }}"><span class="sr">{{ SEV_NAME[f.severity] }}: {{ f.message }}</span></a>{% endfor %}
+  </div>
+  {% else %}
+  <div class="strip strip-clear"><span>Keine offenen Befunde</span></div>
+  {% endif %}
+{% endmacro %}
+
+{% macro counts(c) %}
+  <ul class="counts">
+    {% for s in SEVERITIES if s != 'INFO' %}
+      <li class="sev-{{ s|lower }} {% if not c[s] %}zero{% endif %}"><b>{{ c[s] or 0 }}</b> {{ SEV_NAME[s] | lower }}</li>
+    {% endfor %}
+  </ul>
+{% endmacro %}
+
+{% macro finding(f, r, open=false, actions=true) %}
+<details class="finding sev-{{ f.severity|lower }}" id="f-{{ r.id }}-{{ f.idx }}" data-sev="{{ f.severity }}" data-new="{{ 1 if f.new else 0 }}" {% if open %}open{% endif %}>
+  <summary>
+    <span class="sev">{{ SEV_NAME[f.severity] }}</span>
+    <span class="msg">{{ f.message }}{% if f.new %} <span class="new">neu</span>{% endif %}</span>
+  </summary>
+  <div class="body">
+    {% if f.details %}
+      <ul class="det">{% for d in f.details %}<li>{{ d | detail(r) }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% set h = f.hint %}
+    {% if h.why %}<p class="why">{{ h.why }}</p>{% endif %}
+    {% if h.steps %}
+    <div class="fix">
+      <h4>So behebst du es {% if h.effort and h.effort != '—' %}<span class="effort">Aufwand: {{ h.effort }}</span>{% endif %}</h4>
+      <ol>
+      {% for s in h.steps %}
+        <li>{% if s.startswith('$ ') %}<span class="cmdline"><code>{{ s[2:] }}</code><button type="button" class="copy" data-copy="{{ s[2:] }}">Kopieren</button></span>{% else %}{{ s }}{% endif %}</li>
+      {% endfor %}
+      </ol>
+    </div>
+    {% endif %}
+    {% if h.alarm and f.severity in ('KRITISCH', 'HOCH') %}
+    <div class="alarm">
+      <h4>Wenn sich ein Einbruch bestätigt</h4>
+      <ul>{% for s in INCIDENT %}<li>{{ s }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if actions and f.severity != 'INFO' %}
+    <div class="actions">
+      <form method="post" action="{{ url_for('scan_module', mod=f.module) }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn btn-quiet">Nach dem Beheben erneut prüfen</button>
+      </form>
+      <form method="post" action="{{ url_for('ignore') }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="report" value="{{ r.id }}">
+        <input type="hidden" name="idx" value="{{ f.idx }}">
+        <button class="btn btn-quiet" data-confirm="Diese Meldung künftig ausblenden? Nur für geprüfte Fehlalarme verwenden – echte Probleme verschwinden sonst aus allen Berichten.">Als Fehlalarm ausblenden</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</details>
+{% endmacro %}
+
+{% macro progress(status) %}
+<section class="progress-box" id="progress-box" data-running="{{ 1 if status.running or status.queued else 0 }}">
+  <h2 id="pg-title">{% if status.running %}{{ status.label }} läuft{% elif status.queued %}Scan wird gestartet …{% endif %}</h2>
+  <progress id="pg-bar" max="{{ status.total or 1 }}" value="{{ (status.index or 1) - 1 if status.running else 0 }}"></progress>
+  <p id="pg-text">{% if status.running %}Schritt {{ status.index }} von {{ status.total }}: {{ status.module_title }}{% else %}Warte auf den Start …{% endif %}</p>
+  <div class="pg-sub" id="pg-sub" {% if not status.sub_total and not status.sub_text %}hidden{% endif %}
+       data-start="{{ status.sub_start or 0 }}">
+    <progress id="pg-subbar" max="{{ status.sub_total or 1 }}" value="{{ status.sub_done or 0 }}"></progress>
+    <p id="pg-subtext">{% if status.sub_total %}{{ status.sub_done }} von {{ status.sub_total }} Dateien{% endif %}</p>
+    <p class="pg-dir" id="pg-dir">{% if status.sub_text %}{{ status.sub_text }}{% endif %}</p>
+  </div>
+  <p class="muted" id="pg-hint">Der Scan läuft auf dem Server weiter, auch wenn du diese Seite schließt.</p>
+  <form method="post" action="{{ url_for('scan_cancel') }}" class="cancel-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn btn-quiet" data-confirm="Laufenden Scan wirklich abbrechen? Es entsteht kein Bericht für diesen Durchlauf.">Scan abbrechen</button>
+  </form>
+</section>
+{% endmacro %}

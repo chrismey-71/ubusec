@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{% block title %}ubusec{% endblock %} – {{ host }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+<link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body data-csrf="{{ csrf }}" data-status-url="{{ url_for('api_status') if user else '' }}">
+{% if user %}
+<div class="shell">
+  <aside class="side">
+    <a class="brand" href="{{ url_for('dashboard') }}">
+      <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><path class="brand-shield" d="M16 2 4 6.5v8.7c0 7.3 5 13.4 12 14.8 7-1.4 12-7.5 12-14.8V6.5L16 2z"/><path class="brand-check" d="m10.5 16.2 3.8 3.8 7.2-7.6" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>ubusec</span>
+    </a>
+    <p class="hostname" title="Überwachter Server">{{ host }}</p>
+    {% set ep = request.endpoint %}
+    <nav aria-label="Hauptmenü">
+      <a href="{{ url_for('dashboard') }}" {% if ep == 'dashboard' %}aria-current="page"{% endif %}>Übersicht</a>
+      <a href="{{ url_for('scan') }}" {% if ep == 'scan' %}aria-current="page"{% endif %}>Scan starten</a>
+      <a href="{{ url_for('reports') }}" {% if ep in ('reports', 'report', 'raw_file') %}aria-current="page"{% endif %}>Berichte</a>
+      <a href="{{ url_for('recommendations') }}" {% if ep == 'recommendations' %}aria-current="page"{% endif %}>Empfehlungen</a>
+      <a href="{{ url_for('tools') }}" {% if ep == 'tools' %}aria-current="page"{% endif %}>Werkzeuge</a>
+      <a href="{{ url_for('settings') }}" {% if ep in ('settings', 'totp_setup') %}aria-current="page"{% endif %}>Einstellungen</a>
+    </nav>
+    {% if NEW_VERSION %}<a class="update-pill" href="{{ url_for('tools') }}#ubusec">Neue Version {{ NEW_VERSION }}</a>{% endif %}
+    <div class="running-pill" id="running-pill" hidden><span class="pulse" aria-hidden="true"></span><a href="{{ url_for('scan') }}">Scan läuft</a></div>
+    <form method="post" action="{{ url_for('logout') }}" class="logout">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <span>Angemeldet als {{ user }}</span>
+      <button class="linkbtn">Abmelden</button>
+      <span class="version">ubusec {{ VERSION }}</span>
+    </form>
+  </aside>
+  <main id="inhalt">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, m in messages %}<p class="flash flash-{{ cat }}" role="status">{{ m }}</p>{% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% else %}
+<main class="bare">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, m in messages %}<p class="flash flash-{{ cat }}" role="status">{{ m }}</p>{% endfor %}
+  {% endwith %}
+  {% block bare %}{% endblock %}
+</main>
+{% endif %}
+</body>
+</html>

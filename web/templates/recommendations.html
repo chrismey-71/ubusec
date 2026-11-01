@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}Empfehlungen{% endblock %}
+{% block content %}
+<h1>Empfehlungen</h1>
+<p class="lede">Alle offenen Punkte aus der jeweils letzten Prüfung jedes Bereichs, das Wichtigste zuerst. Zu jedem Punkt steht, warum er zählt und wie du ihn behebst.</p>
+
+{% if not todo %}
+  <p class="ok-line big">Keine offenen Punkte. {% if state.missing %}Noch nicht geprüft: {{ state.missing | titles }}.{% endif %}</p>
+{% else %}
+  {{ ui.strip(todo) }}
+  {% for s in SEVERITIES if s != 'INFO' %}
+    {% set group = todo | selectattr('severity', 'equalto', s) | list %}
+    {% if group %}
+    <section>
+      <h2 class="sev-head sev-{{ s|lower }}">{{ {'KRITISCH': 'Sofort handeln', 'HOCH': 'Bald beheben', 'MITTEL': 'Bei Gelegenheit verbessern', 'NIEDRIG': 'Feinschliff'}[s] }} <span class="muted">{{ group|length }}</span></h2>
+      {% for f in group %}{{ ui.finding(f, state.sources[f.module]) }}{% endfor %}
+    </section>
+    {% endif %}
+  {% endfor %}
+{% endif %}
+
+{% if todo | selectattr('module', 'equalto', 'baseline') | list %}
+<section class="baseline-box">
+  <h2>Änderungen als neue Baseline übernehmen</h2>
+  <p>Wenn alle gemeldeten Änderungen (neue Konten, Schlüssel, Ports, Cronjobs …) von dir oder Virtualmin stammen, übernimm den aktuellen Zustand als neuen Ausgangspunkt. Danach meldet ubusec nur noch Änderungen ab jetzt.</p>
+  <form method="post" action="{{ url_for('accept_baseline') }}" class="stack-inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="check"><input type="checkbox" name="confirm" value="ja" required> <span>Ich habe alle Änderungen geprüft und sie sind beabsichtigt.</span></label>
+    <button class="btn">Baseline übernehmen</button>
+  </form>
+</section>
+{% endif %}
+
+{% if lynis %}
+<section>
+  <details class="lynis">
+    <summary><h2>Härtungsvorschläge von Lynis ({{ lynis|length }})</h2></summary>
+    <p class="muted">Feinere Härtungsschritte. Details zu einem Vorschlag: <code>sudo lynis show details TEST-ID</code></p>
+    <ul>{% for l in lynis %}<li>{{ l }}</li>{% endfor %}</ul>
+  </details>
+</section>
+{% endif %}
+{% endblock %}

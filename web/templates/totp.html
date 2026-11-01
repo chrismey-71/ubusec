@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Zwei-Faktor einrichten{% endblock %}
+{% block content %}
+<p class="crumb"><a href="{{ url_for('settings') }}#konto">Einstellungen</a></p>
+<h1>Zwei-Faktor-Anmeldung einrichten</h1>
+<ol class="steps">
+  <li>Installiere auf dem Handy eine Authenticator-App, zum Beispiel <b>Aegis</b> (Android), <b>Google Authenticator</b> oder <b>Microsoft Authenticator</b>.</li>
+  <li>{% if has_qr %}Scanne diesen Code mit der App:
+      <img class="qr" src="{{ url_for('totp_qr') }}" alt="QR-Code für die Authenticator-App" width="220" height="220">
+      Oder gib den Schlüssel von Hand ein:{% else %}Gib in der App diesen Schlüssel von Hand ein (Kontoart „zeitbasiert“):{% endif %}
+      <p class="secret"><code>{{ secret }}</code><button type="button" class="copy" data-copy="{{ secret | replace(' ', '') }}">Kopieren</button></p></li>
+  <li>Gib zur Bestätigung den 6-stelligen Code ein, den die App jetzt anzeigt:
+    <form method="post" action="{{ url_for('totp_confirm') }}" class="stack-inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus class="code-input" aria-label="Code aus der App">
+      <button class="btn btn-primary">Bestätigen und aktivieren</button>
+    </form>
+  </li>
+</ol>
+<p class="muted small">Bewahre den Schlüssel sicher auf (z. B. im Passwortmanager). Geht das Handy verloren, kann ein anderer Benutzer oder root mit <code>sudo ubusec --web-user NAME</code> den Zugang zurücksetzen.</p>
+{% endblock %}

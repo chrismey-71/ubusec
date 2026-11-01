@@ -1,0 +1,1876 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  ubusec – Sicherheits-Scanner für Ubuntu-Server
+#
+#  Bündelt bewährte Open-Source-Werkzeuge zu einem knappen Gesamtbericht:
+#    OpenSCAP + Ubuntu-OVAL (CVEs) · Lynis (Härtung) · rkhunter · chkrootkit
+#    unhide · ClamAV · Linux Malware Detect (optional) · AIDE (optional)
+#    dpkg --verify · needrestart
+#  plus eigene Prüfungen (Rechte, Firewall, Ports, SSH, sysctl, Baseline-
+#  Vergleich, Malware-Heuristiken, Webshell-Suche).
+#
+#  Aufruf:  sudo ubusec --help
+#  Lizenz:  MIT
+# =============================================================================
+set -uo pipefail
+umask 027
+export LC_ALL=C
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+UBUSEC_VERSION="1.4.0"
+SELF_PATH=$(readlink -f "$0")
+INSTALL_PATH=/usr/local/sbin/ubusec
+CONF_DIR=/etc/ubusec
+CONF_FILE=$CONF_DIR/ubusec.conf
+IGNORE_FILE=$CONF_DIR/ignore.list
+STATE_DIR=/var/lib/ubusec
+BASE_DIR=$STATE_DIR/baseline
+LOG_DIR=/var/log/ubusec
+QUEUE_DIR=$STATE_DIR/queue
+WEB_DIR=/usr/local/lib/ubusec/web
+WEB_GROUP=ubusec
+SRC_DIR=$(dirname "$SELF_PATH")
+
+# ---------------------------------------------------------------- Defaults ---
+# (werden von /etc/ubusec/ubusec.conf überschrieben)
+CLAM_PATHS_QUICK="/tmp /var/tmp /dev/shm /root /home /var/www /etc /usr/local /opt"
+CLAM_PATHS_FULL="/"
+CLAM_EXCLUDE_DIRS="^/proc/ ^/sys/ ^/dev/ ^/run/ ^/snap/ ^/var/lib/docker/ ^/var/lib/clamav/ ^/var/log/ubusec/ ^/var/lib/ubusec/"
+CLAM_MAX_FILESIZE="100M"
+WEB_PATHS="/var/www /home"
+RISKY_PORTS_HIGH="21 23 111 135 139 445 2375 2376 3306 5432 5984 6379 8086 9200 9300 11211 27017"
+RISKY_PORTS_MED="10000 20000 8080 8443 5900"
+MAIL_TO=""
+NTFY_URL=""
+NOTIFY_MIN="HOCH"
+NOTIFY_ONLY_NEW=1
+KEEP_DAYS=60
+SITES_EXCLUDE=""
+SITES_EXTRA=""
+SITES_TESTSSL=0
+WPSCAN_API_TOKEN=""
+UBUSEC_REPO="chrismey-71/ubusec"   # GitHub-Repository für den Versionshinweis
+UPDATE_CHECK=1               # bei GitHub nach neuen ubusec-Versionen fragen
+CLAM_PARALLEL=0              # 0 = automatisch, sonst Anzahl paralleler clamscan-Prozesse
+CLAM_EXCLUDE_DB=1            # Datenbankdateien (MySQL/MariaDB, PostgreSQL …)
+CLAM_EXCLUDE_BACKUPS=1       # Backup-Ordner (/backup, ~/backups …)
+CLAM_EXCLUDE_LOGS=1          # Protokolle (/var/log, ~/logs)
+CLAM_EXCLUDE_MAIL=0          # Postfächer (Maildir)
+CLAM_EXCLUDE_NEXTCLOUD=0     # Nextcloud-Datenordner (sinnvoll mit der App „Antivirus for files“)
+CLAM_EXCLUDE_CUSTOM=""       # weitere Ordner, mit Leerzeichen getrennt
+QUICK_ON=1; QUICK_DAYS="Mon,Tue,Wed,Thu,Fri,Sat"; QUICK_TIME="03:17"
+FULL_ON=1;  FULL_DAYS="Sun";                     FULL_TIME="03:17"
+
+SETTINGS_FILE=$CONF_DIR/settings.conf     # von der Weboberfläche verwaltet (sicher erzeugt)
+SCHEDULE_FILE=$CONF_DIR/schedule.conf
+CHECK_DIR=/usr/local/lib/ubusec/checks
+[ -r "$CONF_FILE" ] && . "$CONF_FILE"
+[ -r "$SETTINGS_FILE" ] && . "$SETTINGS_FILE"
+[ -r "$SCHEDULE_FILE" ] && . "$SCHEDULE_FILE"
+
+# ------------------------------------------------------------- Konstanten ---
+declare -A RANK=([KRITISCH]=4 [HOCH]=3 [MITTEL]=2 [NIEDRIG]=1 [INFO]=0)
+ALL_MODULES="tools updates cve config perms firewall integrity baseline rootkit malware web sites apps"
+QUICK_MODULES="tools updates cve firewall integrity baseline rootkit malware"
+declare -A MOD_TITLE=(
+  [tools]="Prüfwerkzeuge"           [updates]="Updates & Neustarts"   [cve]="CVE-Schwachstellen"
+  [config]="Konfiguration & Härtung" [perms]="Dateiberechtigungen"
+  [firewall]="Firewall & Ports"     [integrity]="Datei-Integrität"
+  [baseline]="Änderungen ggü. Baseline" [rootkit]="Rootkits & Einbruchsspuren"
+  [malware]="Malware (ClamAV)"      [web]="Webshells & Web-Malware"
+  [sites]="Websites & Domains"      [apps]="Webanwendungen"
+)
+
+# ----------------------------------------------------------- Hilfsfunktionen ---
+COLOR=0; QUIET=0; MODE=quick; NOTIFY=1; TRIGGER=manual
+die()  { echo "ubusec: $*" >&2; exit 64; }
+have() { command -v "$1" >/dev/null 2>&1; }
+log()  { [ "$QUIET" = 1 ] || printf '%s\n' "$*" >&2; }
+
+c() { # c FARBE TEXT
+  if [ "$COLOR" = 1 ]; then
+    case $1 in
+      KRITISCH) printf '\e[1;37;41m%s\e[0m' "$2" ;; HOCH) printf '\e[1;31m%s\e[0m' "$2" ;;
+      MITTEL) printf '\e[1;33m%s\e[0m' "$2" ;;     NIEDRIG) printf '\e[36m%s\e[0m' "$2" ;;
+      INFO|dim) printf '\e[2m%s\e[0m' "$2" ;;      ok) printf '\e[32m%s\e[0m' "$2" ;;
+      bold) printf '\e[1m%s\e[0m' "$2" ;;          *) printf '%s' "$2" ;;
+    esac
+  else printf '%s' "$2"; fi
+}
+
+IGNORES=()
+load_ignores() {
+  [ -r "$IGNORE_FILE" ] || return 0
+  local l
+  while IFS= read -r l; do
+    [[ $l =~ ^[[:space:]]*(#|$) ]] && continue
+    IGNORES+=("$l")
+  done <"$IGNORE_FILE"
+}
+
+SUPPRESSED=0
+# add SCHWERE MODUL MELDUNG [DETAIL ...]
+add() {
+  local sev=$1 mod=$2 msg=$3; shift 3
+  local det="" i
+  for i in "$@"; do i=${i//$'\t'/ }; i=${i//$'\n'/ }; det+="${det:+$'\x1f'}$i"; done
+  msg=${msg//$'\t'/ }; msg=${msg//$'\n'/ }
+  for i in "${IGNORES[@]}"; do
+    if [[ "$mod|$msg|$det" =~ $i ]]; then SUPPRESSED=$((SUPPRESSED+1)); return 0; fi
+  done
+  printf '%s\t%s\t%s\t%s\t%s\n' "${RANK[$sev]}" "$sev" "$mod" "$msg" "$det" >>"$FINDINGS"
+}
+
+# take DATEI MAX  -> füllt ITEMS mit höchstens MAX Zeilen (+ Hinweis auf Rest)
+ITEMS=()
+take() {
+  local f=$1 max=${2:-10} n
+  ITEMS=()
+  [ -s "$f" ] || return 0
+  n=$(wc -l <"$f")
+  mapfile -t ITEMS < <(head -n "$max" "$f")
+  if (( n > max )); then ITEMS+=("… und $((n-max)) weitere → $f"); fi
+}
+
+need() { # need BEFEHL MODUL PAKET
+  have "$1" && return 0
+  add NIEDRIG "$2" "$1 nicht installiert – Teilprüfung übersprungen" "Installieren: apt install $3  (oder: ubusec --install)"
+  return 1
+}
+
+# Liste öffentlich lauschender Dienste: "proto port prozess"
+public_ports() {
+  ss -H -tulpn 2>/dev/null | awk '
+    { proto=$1; loc=$5; proc=$7
+      n=split(loc,a,":"); port=a[n]; addr=substr(loc,1,length(loc)-length(port)-1)
+      gsub(/[\[\]]/,"",addr); sub(/%.*/,"",addr)
+      if (addr ~ /^127\./ || addr=="::1" || addr ~ /^::ffff:127\./) next
+      p="?"; if (match(proc,/\("[^"]+"/)) p=substr(proc,RSTART+2,RLENGTH-3)
+      print proto, port, p }' | sort -u -k1,1 -k2,2n
+}
+
+local_mounts() {
+  df -l -P -x tmpfs -x devtmpfs -x squashfs -x overlay -x efivarfs -x fuse.lxcfs 2>/dev/null \
+    | awk 'NR>1{print $6}' | sort -u
+}
+
+# Abbruch (systemctl stop, Strg+C, „Scan abbrechen“ in der Weboberfläche)
+on_abort() {
+  trap - INT TERM HUP EXIT
+  pkill -TERM -P $$ 2>/dev/null          # laufendes Werkzeug (z. B. clamscan) mit beenden
+  write_status false "" 0 0 130 ""
+  [ -n "${LOG_DIR:-}" ] && printf '%s Scan abgebrochen (%s, PID %s)\n' "$(date '+%F %T')" "${MODE_LABEL:-$MODE}" "$$" >>"$LOG_DIR/web-audit.log"
+  log "ubusec: Scan abgebrochen."
+  exit 130
+}
+
+grp() { getent group "$WEB_GROUP" >/dev/null 2>&1 && echo "$WEB_GROUP" || echo root; }
+
+ensure_dirs() {
+  local g; g=$(grp)
+  install -d -m 0750 -o root -g "$g" "$STATE_DIR" "$LOG_DIR" "$LOG_DIR/raw"
+  install -d -m 0700 -o root -g root "$BASE_DIR" "$STATE_DIR/work"
+  install -d -m 0770 -o root -g "$g" "$QUEUE_DIR"
+  install -d -m 0755 -o root -g root "$CONF_DIR"
+  install -d -m 0700 -o root -g root "$STATE_DIR/cache"
+  if id "$WEB_GROUP" >/dev/null 2>&1; then
+    install -d -m 0700 -o "$WEB_GROUP" -g "$WEB_GROUP" "$STATE_DIR/web"
+    [ -f "$IGNORE_FILE" ] && { chown root:"$g" "$IGNORE_FILE"; chmod 640 "$IGNORE_FILE"; }
+    [ -f "$LOG_DIR/web-audit.log" ] && { chown root:"$g" "$LOG_DIR/web-audit.log"; chmod 640 "$LOG_DIR/web-audit.log"; }
+  fi
+}
+
+# Statusdatei für die Weboberfläche (atomar geschrieben)
+SUB_DONE=0; SUB_TOTAL=0; SUB_TEXT=""; SUB_START=0
+write_status() { # write_status running modul index total [exitcode report]
+  local f=$STATE_DIR/status.json t="" st
+  [ -n "$2" ] && t=${MOD_TITLE[$2]:-}
+  st=${SUB_TEXT//[\\\"]/_}; st=${st//[$'\t\n\r']/ }
+  printf '{"running":%s,"mode":"%s","label":"%s","module":"%s","module_title":"%s","index":%s,"total":%s,"started":%s,"updated":%s,"trigger":"%s","exit":%s,"report":"%s","pid":%s,"sub_done":%s,"sub_total":%s,"sub_text":"%s","sub_start":%s}\n' \
+    "$1" "$MODE" "${MODE_LABEL:-}" "$2" "$t" "$3" "$4" "${T0:-0}" "$(date +%s)" "$TRIGGER" "${5:-null}" "${6:-}" "$$" \
+    "${SUB_DONE:-0}" "${SUB_TOTAL:-0}" "$st" "${SUB_START:-0}" >"$f.tmp"
+  chgrp "$(grp)" "$f.tmp" 2>/dev/null; chmod 640 "$f.tmp"; mv -f "$f.tmp" "$f"
+}
+
+# ============================================================================
+#  MODUL: updates – ausstehende Updates, Neustarts, Support-Status
+# ============================================================================
+mod_updates() {
+  apt-get update -qq >"$RAW/apt-update.log" 2>&1 \
+    || add NIEDRIG updates "apt-get update fehlgeschlagen – Update-Daten evtl. veraltet" "Log: $RAW/apt-update.log"
+
+  apt list --upgradable 2>/dev/null | grep -v '^Listing' >"$RAW/upgradable.txt"
+  grep -- '-security' "$RAW/upgradable.txt" | cut -d/ -f1 >"$RAW/upg-security.txt"
+  grep -v -- '-security' "$RAW/upgradable.txt" | cut -d/ -f1 >"$RAW/upg-other.txt"
+  local ns no
+  ns=$(grep -c . "$RAW/upg-security.txt"); no=$(grep -c . "$RAW/upg-other.txt")
+  if (( ns > 0 )); then take "$RAW/upg-security.txt" 12
+    add HOCH updates "$ns Sicherheitsupdates ausstehend" "${ITEMS[@]}" "Beheben: apt upgrade"
+  fi
+  (( no > 0 )) && add NIEDRIG updates "$no weitere Paket-Updates verfügbar" "Liste: $RAW/upg-other.txt"
+
+  local held; held=$(apt-mark showhold 2>/dev/null | tr '\n' ' ')
+  [ -n "$held" ] && add NIEDRIG updates "Zurückgehaltene Pakete (hold): $held"
+
+  if [ -f /var/run/reboot-required ]; then
+    add MITTEL updates "Neustart erforderlich (Updates erst nach Reboot wirksam)" \
+      "Auslöser: $(tr '\n' ' ' </var/run/reboot-required.pkgs 2>/dev/null)"
+  fi
+
+  if have needrestart; then
+    needrestart -b -r l >"$RAW/needrestart.txt" 2>/dev/null
+    local ksta kcur kexp svc
+    ksta=$(awk -F': ' '/NEEDRESTART-KSTA/{print $2}' "$RAW/needrestart.txt")
+    kcur=$(awk -F': ' '/NEEDRESTART-KCUR/{print $2}' "$RAW/needrestart.txt")
+    kexp=$(awk -F': ' '/NEEDRESTART-KEXP/{print $2}' "$RAW/needrestart.txt")
+    [ "${ksta:-0}" -gt 1 ] 2>/dev/null && \
+      add MITTEL updates "Laufender Kernel ist veraltet (läuft: $kcur, installiert: $kexp)" "Beheben: Neustart"
+    awk -F': ' '/NEEDRESTART-SVC/{print $2}' "$RAW/needrestart.txt" >"$RAW/needrestart-svc.txt"
+    svc=$(grep -c . "$RAW/needrestart-svc.txt")
+    if (( svc > 0 )); then take "$RAW/needrestart-svc.txt" 8
+      add MITTEL updates "$svc Dienste laufen noch mit alten (ggf. verwundbaren) Bibliotheken" "${ITEMS[@]}" "Beheben: needrestart -r a"
+    fi
+  else need needrestart updates needrestart; fi
+
+  if ! dpkg -s unattended-upgrades >/dev/null 2>&1 || \
+     ! apt-config dump 2>/dev/null | grep -q 'APT::Periodic::Unattended-Upgrade "1"'; then
+    add MITTEL updates "Automatische Sicherheitsupdates (unattended-upgrades) nicht aktiv" \
+      "Beheben: apt install unattended-upgrades && dpkg-reconfigure -plow unattended-upgrades"
+  fi
+
+  if have ubuntu-distro-info; then
+    if ! ubuntu-distro-info --supported 2>/dev/null | grep -qx "$OS_CODENAME"; then
+      if ubuntu-distro-info --supported-esm 2>/dev/null | grep -qx "$OS_CODENAME"; then
+        add HOCH updates "Ubuntu $OS_VERSION ist aus dem Standard-Support – nur noch mit Ubuntu Pro (ESM) Updates"
+      else
+        add KRITISCH updates "Ubuntu $OS_VERSION erhält keine Sicherheitsupdates mehr (End of Life)"
+      fi
+    fi
+  fi
+}
+
+# ============================================================================
+#  MODUL: cve – bekannte Schwachstellen installierter Pakete (Ubuntu OVAL)
+# ============================================================================
+mod_cve() {
+  need oscap cve "openscap-scanner (bzw. libopenscap8)" || return 0
+  need bunzip2 cve bzip2 || return 0
+  local dir=$STATE_DIR/oval oval url
+  mkdir -p "$dir"
+  oval=$dir/com.ubuntu.$OS_CODENAME.usn.oval.xml
+  url="https://security-metadata.canonical.com/oval/com.ubuntu.$OS_CODENAME.usn.oval.xml.bz2"
+  if [ ! -s "$oval" ] || [ -n "$(find "$oval" -mmin +600 2>/dev/null)" ]; then
+    if curl -fsSL --max-time 300 -o "$oval.bz2" "$url" 2>"$RAW/oval-download.log" \
+       && bunzip2 -c "$oval.bz2" >"$oval.tmp"; then mv "$oval.tmp" "$oval"
+    else add NIEDRIG cve "Ubuntu-OVAL-Daten konnten nicht geladen werden" "$url"; fi
+    rm -f "$oval.bz2" "$oval.tmp"
+  fi
+  [ -s "$oval" ] || return 0
+
+  oscap oval eval --results "$RAW/oval-results.xml" --report "$RAW/oval-report.html" "$oval" \
+    >"$RAW/oscap.log" 2>&1
+  [ -s "$RAW/oval-results.xml" ] || { add NIEDRIG cve "OpenSCAP-Auswertung fehlgeschlagen" "Log: $RAW/oscap.log"; return 0; }
+
+  python3 - "$RAW/oval-results.xml" >"$RAW/cve-hits.tsv" <<'PY'
+import sys, xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+ln = lambda e: e.tag.rsplit('}', 1)[-1]
+defs, hits = {}, set()
+for d in root.iter():
+    if ln(d) != 'definition':
+        continue
+    if d.get('result') == 'true' and d.get('definition_id'):
+        hits.add(d.get('definition_id'))
+    elif d.get('id') and d.get('class'):
+        title, sev, cves = '', '', 0
+        for x in d.iter():
+            n = ln(x)
+            if n == 'title' and not title: title = (x.text or '').strip()
+            elif n == 'severity' and not sev: sev = (x.text or '').strip()
+            elif n == 'cve': cves += 1
+        defs[d.get('id')] = (title, sev, cves)
+for h in sorted(hits):
+    t, s, n = defs.get(h, (h, '', 0))
+    print(f"{s or 'Unknown'}\t{n}\t{t}")
+PY
+  local total; total=$(grep -c . "$RAW/cve-hits.tsv")
+  if (( total == 0 )); then
+    add INFO cve "Keine offenen CVEs mit verfügbarem Fix gefunden (Ubuntu OVAL, $(date -r "$oval" +%d.%m.%Y))"
+    return 0
+  fi
+  local s sev n cves
+  for s in Critical High Medium Low Negligible Unknown; do
+    awk -F'\t' -v s="$s" '$1==s{print $3"  ("$2" CVEs)"}' "$RAW/cve-hits.tsv" >"$RAW/cve-$s.txt"
+    n=$(grep -c . "$RAW/cve-$s.txt"); (( n == 0 )) && continue
+    cves=$(awk -F'\t' -v s="$s" '$1==s{t+=$2}END{print t+0}' "$RAW/cve-hits.tsv")
+    case $s in Critical) sev=KRITISCH;; High) sev=HOCH;; Medium) sev=MITTEL;; *) sev=NIEDRIG;; esac
+    take "$RAW/cve-$s.txt" 8
+    add "$sev" cve "$n Sicherheitsmeldungen (USN) der Stufe $s offen – $cves CVEs" "${ITEMS[@]}"
+  done
+  add INFO cve "CVE-Detailbericht (HTML)" "$RAW/oval-report.html" \
+    "Hinweis: Fixes aus 'esm-apps/esm-infra' benötigen Ubuntu Pro (kostenlos für bis zu 5 Rechner)"
+}
+
+# ============================================================================
+#  MODUL: config – Lynis-Audit, SSH, sysctl, Konten, Schutzdienste
+# ============================================================================
+mod_config() {
+  # --- Lynis ---------------------------------------------------------------
+  if need lynis config lynis; then
+    lynis audit system --cronjob --no-colors --quiet \
+      --report-file "$RAW/lynis-report.dat" --logfile "$RAW/lynis.log" >"$RAW/lynis.out" 2>&1
+    local hi line id txt
+    hi=$(awk -F= '/^hardening_index=/{print $2; exit}' "$RAW/lynis-report.dat" 2>/dev/null)
+    while IFS= read -r line; do
+      id=${line%%|*}; txt=${line#*|}; txt=${txt%%|*}
+      add MITTEL config "Lynis-Warnung: $txt [$id]" "Details: lynis show details $id"
+    done < <(sed -n 's/^warning\[\]=//p' "$RAW/lynis-report.dat" 2>/dev/null)
+    sed -n 's/^suggestion\[\]=//p' "$RAW/lynis-report.dat" 2>/dev/null \
+      | awk -F'|' '{print $2" ["$1"]"}' >"$RAW/lynis-suggestions.txt"
+    if [ -n "$hi" ]; then
+      take "$RAW/lynis-suggestions.txt" 6
+      if (( hi < 65 )); then
+        add MITTEL config "Lynis-Härtungsindex nur $hi/100 – $(grep -c . "$RAW/lynis-suggestions.txt") Vorschläge" "${ITEMS[@]}"
+      else
+        add INFO config "Lynis-Härtungsindex $hi/100 – $(grep -c . "$RAW/lynis-suggestions.txt") Vorschläge" "${ITEMS[@]}"
+      fi
+    fi
+  fi
+
+  # --- SSH -----------------------------------------------------------------
+  if have sshd && sshd -T >"$RAW/sshd-T.txt" 2>/dev/null; then
+    sv() { awk -v k="$1" '$1==k{print $2; exit}' "$RAW/sshd-T.txt"; }
+    case $(sv permitrootlogin) in
+      yes) add HOCH config "SSH: Root-Login mit Passwort erlaubt (PermitRootLogin yes)" "Empfehlung: PermitRootLogin prohibit-password oder no";;
+    esac
+    [ "$(sv passwordauthentication)" = yes ] && \
+      add MITTEL config "SSH: Passwort-Anmeldung aktiv – anfällig für Brute-Force" "Empfehlung: nur Schlüssel (PasswordAuthentication no)"
+    [ "$(sv permitemptypasswords)" = yes ] && add KRITISCH config "SSH: Leere Passwörter erlaubt (PermitEmptyPasswords yes)"
+    [ "$(sv x11forwarding)" = yes ] && add NIEDRIG config "SSH: X11Forwarding aktiv (auf Servern unnötig)"
+    local mat; mat=$(sv maxauthtries)
+    [ -n "$mat" ] && (( mat > 4 )) && add NIEDRIG config "SSH: MaxAuthTries $mat (empfohlen: ≤ 4)"
+  fi
+
+  # --- sysctl --------------------------------------------------------------
+  local spec key want sev cur
+  : >"$RAW/sysctl-dev.txt"
+  for spec in \
+    "kernel.randomize_va_space:^2$:MITTEL" "fs.protected_hardlinks:^1$:MITTEL" \
+    "fs.protected_symlinks:^1$:MITTEL"     "fs.suid_dumpable:^0$:NIEDRIG" \
+    "kernel.kptr_restrict:^[12]$:NIEDRIG"  "kernel.dmesg_restrict:^1$:NIEDRIG" \
+    "kernel.yama.ptrace_scope:^[123]$:NIEDRIG" "net.ipv4.tcp_syncookies:^1$:NIEDRIG" \
+    "net.ipv4.conf.all.accept_redirects:^0$:NIEDRIG" "net.ipv4.conf.all.send_redirects:^0$:NIEDRIG" \
+    "net.ipv4.conf.all.accept_source_route:^0$:NIEDRIG" "net.ipv4.conf.all.log_martians:^1$:NIEDRIG" \
+    "net.ipv6.conf.all.accept_redirects:^0$:NIEDRIG"; do
+    IFS=: read -r key want sev <<<"$spec"
+    cur=$(sysctl -n "$key" 2>/dev/null) || continue
+    [[ $cur =~ $want ]] || echo "$sev $key = $cur (empfohlen ${want//[\^\$]/})" >>"$RAW/sysctl-dev.txt"
+  done
+  for sev in MITTEL NIEDRIG; do
+    grep "^$sev " "$RAW/sysctl-dev.txt" | cut -d' ' -f2- >"$RAW/sysctl-$sev.txt"
+    if [ -s "$RAW/sysctl-$sev.txt" ]; then take "$RAW/sysctl-$sev.txt" 12
+      add "$sev" config "$(grep -c . "$RAW/sysctl-$sev.txt") Kernel-Parameter (sysctl) nicht gehärtet" "${ITEMS[@]}"
+    fi
+  done
+
+  # --- Konten --------------------------------------------------------------
+  local u
+  u=$(awk -F: '$3==0 && $1!="root"{printf "%s ",$1}' /etc/passwd)
+  [ -n "$u" ] && add KRITISCH config "Weitere Konten mit UID 0 (Root-Rechte): $u"
+  u=$(awk -F: '$2==""{printf "%s ",$1}' /etc/shadow 2>/dev/null)
+  [ -n "$u" ] && add KRITISCH config "Konten ohne Passwort: $u"
+  grep -hsE '^[^#].*NOPASSWD' /etc/sudoers /etc/sudoers.d/* >"$RAW/sudo-nopasswd.txt"
+  if [ -s "$RAW/sudo-nopasswd.txt" ]; then take "$RAW/sudo-nopasswd.txt" 5
+    add NIEDRIG config "sudo ohne Passwort (NOPASSWD) konfiguriert" "${ITEMS[@]}"
+  fi
+
+  # --- Schutzdienste -------------------------------------------------------
+  if have aa-status; then aa-status --enabled 2>/dev/null || add MITTEL config "AppArmor ist nicht aktiv"; fi
+  if ! systemctl is-active -q fail2ban 2>/dev/null && ! systemctl is-active -q crowdsec 2>/dev/null; then
+    add MITTEL config "Kein Brute-Force-Schutz aktiv (fail2ban/CrowdSec)" "Beheben: apt install fail2ban"
+  fi
+  local fails
+  fails=$(journalctl --since "24 hours ago" -q _COMM=sshd 2>/dev/null | grep -cE 'Failed password|Invalid user')
+  (( fails > 0 )) && add INFO config "$fails fehlgeschlagene SSH-Anmeldungen in den letzten 24 h"
+  return 0
+}
+
+# ============================================================================
+#  MODUL: perms – Rechte kritischer Dateien, world-writable, SUID, verwaist
+# ============================================================================
+checkmode() { # checkmode PFAD VERBOTENE_BITS SCHWERE
+  local p
+  for p in $1; do
+    [ -e "$p" ] || continue
+    local m o; m=$(stat -c %a "$p"); o=$(stat -c %U "$p")
+    if (( 8#$m & 8#$2 )); then add "$3" perms "Unsichere Rechte $m auf $p" "Soll: keine Bits aus $2 gesetzt"; fi
+    [ "$o" != root ] && add HOCH perms "$p gehört nicht root, sondern $o"
+  done
+}
+
+mod_perms() {
+  checkmode "/etc/passwd /etc/group" 022 HOCH
+  checkmode "/etc/shadow /etc/gshadow" 027 KRITISCH
+  checkmode "/etc/sudoers" 027 HOCH
+  checkmode "/etc/ssh/sshd_config /etc/crontab /etc/hosts /etc/ld.so.conf /etc/environment" 022 HOCH
+  checkmode "$(echo /etc/ssh/ssh_host_*_key)" 037 HOCH
+  checkmode "$(echo /etc/cron.d /etc/cron.daily /etc/cron.hourly /etc/cron.weekly /etc/cron.monthly /etc/sudoers.d)" 022 HOCH
+  checkmode "/root" 027 NIEDRIG
+
+  # Ein Durchlauf über alle lokalen Dateisysteme
+  local m
+  : >"$RAW/find.txt"
+  for m in $(local_mounts); do
+    find "$m" -xdev \( -path /proc -o -path /sys -o -path /dev -o -path /run -o -path /snap \
+         -o -path /var/lib/docker -o -path /var/lib/lxcfs \) -prune -o \
+      \( -type f -perm /6000 -printf 'SUID %p\n' \) -o \
+      \( -type f -perm -0002 -printf 'WWF %p\n' \) -o \
+      \( -type d -perm -0002 ! -perm -1000 -printf 'WWD %p\n' \) -o \
+      \( \( -nouser -o -nogroup \) -printf 'NOU %p\n' \) 2>/dev/null >>"$RAW/find.txt"
+  done
+  sed -n 's/^SUID //p' "$RAW/find.txt" | sort -u >"$RAW/suid.txt"
+  sed -n 's/^WWF //p'  "$RAW/find.txt" | grep -vE '^/(tmp|var/tmp|dev/shm)/' >"$RAW/ww-files.txt"
+  sed -n 's/^WWD //p'  "$RAW/find.txt" >"$RAW/ww-dirs.txt"
+  sed -n 's/^NOU //p'  "$RAW/find.txt" >"$RAW/unowned.txt"
+
+  if [ -s "$RAW/ww-files.txt" ]; then take "$RAW/ww-files.txt" 10
+    add HOCH perms "$(grep -c . "$RAW/ww-files.txt") Dateien für alle beschreibbar (world-writable)" "${ITEMS[@]}" "Beheben: chmod o-w <datei>"
+  fi
+  if [ -s "$RAW/ww-dirs.txt" ]; then take "$RAW/ww-dirs.txt" 10
+    add HOCH perms "$(grep -c . "$RAW/ww-dirs.txt") Verzeichnisse für alle beschreibbar ohne Sticky-Bit" "${ITEMS[@]}"
+  fi
+  if [ -s "$RAW/unowned.txt" ]; then take "$RAW/unowned.txt" 8
+    add MITTEL perms "$(grep -c . "$RAW/unowned.txt") Dateien ohne gültigen Besitzer/Gruppe" "${ITEMS[@]}"
+  fi
+
+  # SUID/SGID-Dateien, die zu keinem Paket gehören
+  : >"$RAW/suid-foreign.txt"
+  local f alt
+  while IFS= read -r f; do
+    dpkg -S "$f" >/dev/null 2>&1 && continue
+    alt=$(sed -E 's#^/usr/(s?bin|lib|lib32|lib64|libx32)/#/\1/#' <<<"$f")
+    [ "$alt" != "$f" ] && dpkg -S "$alt" >/dev/null 2>&1 && continue
+    echo "$f" >>"$RAW/suid-foreign.txt"
+  done <"$RAW/suid.txt"
+  if [ -s "$RAW/suid-foreign.txt" ]; then take "$RAW/suid-foreign.txt" 10
+    add HOCH perms "$(grep -c . "$RAW/suid-foreign.txt") SUID/SGID-Programme gehören zu keinem Paket" "${ITEMS[@]}"
+  fi
+  cp "$RAW/suid.txt" "$STATE_DIR/suid.current"
+
+  # Home-Verzeichnisse & SSH-Schlüssel
+  : >"$RAW/home-open.txt"
+  for f in /home/*/; do
+    [ -d "$f" ] || continue
+    m=$(stat -c %a "$f"); (( 8#$m & 8#007 )) && echo "$f ($m)" >>"$RAW/home-open.txt"
+  done
+  if [ -s "$RAW/home-open.txt" ]; then take "$RAW/home-open.txt" 8
+    add NIEDRIG perms "Home-Verzeichnisse für andere Benutzer lesbar" "${ITEMS[@]}"
+  fi
+  for f in /root/.ssh/authorized_keys* /home/*/.ssh/authorized_keys*; do
+    [ -f "$f" ] || continue
+    m=$(stat -c %a "$f"); (( 8#$m & 8#022 )) && add HOCH perms "authorized_keys für andere beschreibbar: $f ($m)"
+  done
+  return 0
+}
+
+# ============================================================================
+#  MODUL: firewall – aktive Firewall, Default-Policy, offene Ports
+# ============================================================================
+mod_firewall() {
+  local active="" p
+  if have ufw && ufw status verbose >"$RAW/ufw.txt" 2>&1 && grep -q '^Status: active' "$RAW/ufw.txt"; then
+    active="ufw"
+    grep -qE '^Default: (deny|reject) \(incoming\)' "$RAW/ufw.txt" || \
+      add HOCH firewall "ufw: Eingehender Verkehr ist standardmäßig erlaubt" "Beheben: ufw default deny incoming"
+    if grep -qi '^IPV6=no' /etc/default/ufw 2>/dev/null && ip -6 addr show scope global 2>/dev/null | grep -q inet6; then
+      add MITTEL firewall "ufw filtert kein IPv6, obwohl der Server öffentliche IPv6-Adressen hat" "Beheben: IPV6=yes in /etc/default/ufw"
+    fi
+  fi
+  for p in firewalld csf; do systemctl is-active -q "$p" 2>/dev/null && active+=" $p"; done
+  if have nft && nft list ruleset >"$RAW/nft.txt" 2>/dev/null; then
+    grep -qE 'hook input .*policy drop' "$RAW/nft.txt" && active+=" nftables"
+  fi
+  if have iptables; then
+    iptables -S >"$RAW/iptables.txt" 2>/dev/null
+    grep -qE '^-P INPUT (DROP|REJECT)' "$RAW/iptables.txt" && active+=" iptables"
+  fi
+  if [ -z "$active" ]; then
+    add HOCH firewall "Keine aktive Firewall mit Standard-Blockierung erkannt" "Beheben z.B.: ufw allow OpenSSH && ufw enable"
+  else
+    add INFO firewall "Aktive Firewall: ${active# }"
+  fi
+
+  public_ports >"$RAW/ports.txt"
+  local proto port prog list="" risk_h="" risk_m=""
+  while read -r proto port prog; do
+    list+="$port/$proto($prog) "
+    [[ " $RISKY_PORTS_HIGH " == *" $port "* ]] && risk_h+="$port/$proto($prog) "
+    [[ " $RISKY_PORTS_MED "  == *" $port "* ]] && risk_m+="$port/$proto($prog) "
+  done <"$RAW/ports.txt"
+  [ -n "$risk_h" ] && add HOCH firewall "Riskante Dienste lauschen öffentlich: $risk_h" \
+    "Datenbanken/Admin-Dienste nur an 127.0.0.1 binden oder per Firewall auf feste IPs beschränken"
+  [ -n "$risk_m" ] && add MITTEL firewall "Admin-/Web-Oberflächen öffentlich erreichbar: $risk_m" \
+    "Empfehlung: per Firewall auf eigene IP-Adressen einschränken"
+  [ -n "$list" ] && add INFO firewall "Öffentlich lauschende Ports: $list"
+  return 0
+}
+
+# ============================================================================
+#  MODUL: integrity – veränderte Paketdateien (dpkg), AIDE
+# ============================================================================
+mod_integrity() {
+  dpkg --verify >"$RAW/dpkg-verify.txt" 2>/dev/null
+  awk '$1 ~ /^..5/ && $2 != "c" {print $NF}' "$RAW/dpkg-verify.txt" >"$RAW/dpkg-changed.txt"
+  local binre='^/(usr/)?(local/)?s?bin/|^/(usr/)?lib(32|64|x32)?/.*\.so(\.[0-9.]+)?$|^/(usr/)?lib/systemd/systemd'
+  grep -E  "$binre" "$RAW/dpkg-changed.txt" >"$RAW/dpkg-changed-bin.txt"
+  grep -vE "$binre" "$RAW/dpkg-changed.txt" >"$RAW/dpkg-changed-other.txt"
+  if [ -s "$RAW/dpkg-changed-bin.txt" ]; then take "$RAW/dpkg-changed-bin.txt" 10
+    add KRITISCH integrity "$(grep -c . "$RAW/dpkg-changed-bin.txt") Programme/Bibliotheken weichen vom Paket-Original ab" \
+      "${ITEMS[@]}" "Prüfen: dpkg -S <datei>; ggf. apt install --reinstall <paket>"
+  fi
+  if [ -s "$RAW/dpkg-changed-other.txt" ]; then take "$RAW/dpkg-changed-other.txt" 8
+    add MITTEL integrity "$(grep -c . "$RAW/dpkg-changed-other.txt") weitere Paketdateien verändert (keine Konfigurationsdateien)" "${ITEMS[@]}"
+  fi
+
+  if have aide; then
+    local db=/var/lib/aide/aide.db rc
+    if [ -f "$db" ]; then
+      aide --config=/etc/aide/aide.conf --check >"$RAW/aide.txt" 2>&1; rc=$?
+      if (( rc >= 1 && rc <= 7 )); then
+        add MITTEL integrity "AIDE: $(grep -E '^\s*(Added|Removed|Changed) entries' "$RAW/aide.txt" | awk -F: '{gsub(/ entries/,"",$1);gsub(/^[ \t]+/,"",$1);gsub(/[ \t]/,"",$2);printf "%s %s, ",$2,$1}' | sed 's/, $//') seit AIDE-Baseline" \
+          "Details: $RAW/aide.txt" "Nach Prüfung übernehmen: ubusec --accept"
+      elif (( rc > 7 )); then
+        add NIEDRIG integrity "AIDE-Prüfung fehlgeschlagen (Code $rc)" "Log: $RAW/aide.txt"
+      fi
+    else
+      add INFO integrity "AIDE installiert, aber keine Datenbank – Initialisieren mit: ubusec --init-baseline"
+    fi
+  fi
+}
+
+# ============================================================================
+#  MODUL: baseline – neue Konten, Ports, SSH-Schlüssel, Cronjobs, Dienste, SUID
+# ============================================================================
+snap_users()    { awk -F: '{print $1" uid="$3" shell="$7}' /etc/passwd | sort; }
+snap_sudo()     { cat /etc/sudoers /etc/sudoers.d/* 2>/dev/null | grep -vE '^\s*(#|$)' | sort -u; }
+snap_ports()    { public_ports | awk '{print $2"/"$1" ("$3")"}'; }
+snap_suid()     { if [ -s "$STATE_DIR/suid.current" ]; then cat "$STATE_DIR/suid.current"; else
+                    local m; for m in $(local_mounts); do find "$m" -xdev -type f -perm /6000 2>/dev/null; done | sort -u; fi; }
+snap_units()    { systemctl list-unit-files --type=service,timer --state=enabled --no-legend 2>/dev/null | awk '{print $1}' | sort; }
+snap_authkeys() { local f; for f in /root/.ssh/authorized_keys* /home/*/.ssh/authorized_keys*; do
+                    [ -f "$f" ] && ssh-keygen -lf "$f" 2>/dev/null | awk -v f="$f" '{print f": "$2" "$3}'; done | sort; }
+snap_cron()     { local f; for f in /etc/crontab /etc/cron.d/* /var/spool/cron/crontabs/*; do
+                    [ -f "$f" ] && grep -vE '^\s*(#|$)' "$f" | sed "s|^|$f: |"; done
+                  ls -1 /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly 2>/dev/null; }
+
+BASE_SPECS=(
+  "users|KRITISCH|Neue Benutzerkonten"
+  "sudo|HOCH|Neue sudo-Regeln"
+  "authkeys|HOCH|Neue SSH-Schlüssel (authorized_keys)"
+  "ports|HOCH|Neue öffentlich lauschende Ports"
+  "cron|MITTEL|Neue Cronjobs"
+  "units|MITTEL|Neu aktivierte systemd-Dienste/Timer"
+  "suid|HOCH|Neue SUID/SGID-Dateien"
+)
+
+write_baseline() {
+  local spec name
+  for spec in "${BASE_SPECS[@]}"; do name=${spec%%|*}; "snap_$name" >"$BASE_DIR/$name"; done
+  date '+%F %T' >"$BASE_DIR/.created"
+}
+
+mod_baseline() {
+  if [ ! -f "$BASE_DIR/.created" ]; then
+    write_baseline
+    add INFO baseline "Baseline erstmals angelegt – künftige Scans melden Abweichungen davon"
+    return 0
+  fi
+  local spec name sev label
+  for spec in "${BASE_SPECS[@]}"; do
+    IFS='|' read -r name sev label <<<"$spec"
+    "snap_$name" >"$RAW/base-$name.now"
+    comm -13 "$BASE_DIR/$name" "$RAW/base-$name.now" >"$RAW/base-$name.new" 2>/dev/null
+    if [ -s "$RAW/base-$name.new" ]; then take "$RAW/base-$name.new" 8
+      add "$sev" baseline "$label seit $(cat "$BASE_DIR/.created")" "${ITEMS[@]}" "Wenn beabsichtigt: ubusec --accept"
+    fi
+  done
+}
+
+# ============================================================================
+#  MODUL: rootkit – rkhunter, chkrootkit, unhide, eigene Einbruchs-Heuristiken
+# ============================================================================
+mod_rootkit() {
+  # --- rkhunter --------------------------------------------------------------
+  if need rkhunter rootkit rkhunter; then
+    if [ ! -s /var/lib/rkhunter/db/rkhunter.dat ]; then
+      rkhunter --propupd --nocolors >"$RAW/rkhunter-propupd.log" 2>&1
+      add INFO rootkit "rkhunter-Datenbank neu angelegt (Dateieigenschaften als Referenz)"
+    fi
+    [ "$MODE" = full ] && rkhunter --update --nocolors >"$RAW/rkhunter-update.log" 2>&1
+    rkhunter --check --sk --nocolors --noappend-log --logfile "$RAW/rkhunter.log" >"$RAW/rkhunter.out" 2>&1
+    awk '
+      /Warning: / { if (w) print w; sub(/^\[[0-9:]+\] Warning: /,""); w=$0; next }
+      w && /^\[[0-9:]+\]  +[^ ]/ { l=$0; sub(/^\[[0-9:]+\] +/,"",l); if (length(w)<220) w=w" "l; next }
+      { if (w) print w; w="" }
+      END { if (w) print w }' "$RAW/rkhunter.log" 2>/dev/null >"$RAW/rkhunter-warnings.txt"
+    local w sev
+    while IFS= read -r w; do
+      sev=HOCH; [[ $w =~ [Rr]ootkit|[Bb]ackdoor|[Tt]rojan ]] && sev=KRITISCH
+      add "$sev" rootkit "rkhunter: $w"
+    done <"$RAW/rkhunter-warnings.txt"
+  fi
+
+  # --- chkrootkit ------------------------------------------------------------
+  if need chkrootkit rootkit chkrootkit; then
+    chkrootkit -q >"$RAW/chkrootkit.txt" 2>&1
+    grep -i 'INFECTED' "$RAW/chkrootkit.txt" >"$RAW/chkrootkit-inf.txt"
+    while IFS= read -r w; do add KRITISCH rootkit "chkrootkit: $w"; done <"$RAW/chkrootkit-inf.txt"
+    grep -viE 'INFECTED|^\s*$|not (found|tested|infected)|nothing (found|detected)' "$RAW/chkrootkit.txt" >"$RAW/chkrootkit-other.txt"
+    if [ -s "$RAW/chkrootkit-other.txt" ]; then take "$RAW/chkrootkit-other.txt" 5
+      add MITTEL rootkit "chkrootkit meldet Auffälligkeiten (oft harmlos, bitte prüfen)" "${ITEMS[@]}"
+    fi
+  fi
+
+  # --- unhide (nur Vollscan) ---------------------------------------------------
+  if [ "$MODE" = full ] && have unhide-linux; then
+    unhide-linux quick >"$RAW/unhide.txt" 2>&1
+    grep -i 'Found HIDDEN PID' "$RAW/unhide.txt" >"$RAW/unhide-hits.txt"
+    if [ -s "$RAW/unhide-hits.txt" ]; then take "$RAW/unhide-hits.txt" 5
+      add HOCH rootkit "unhide: Versteckte Prozesse gefunden (kurzlebige Prozesse können Fehlalarme auslösen)" "${ITEMS[@]}"
+    fi
+    if have unhide-tcp; then
+      unhide-tcp >"$RAW/unhide-tcp.txt" 2>&1
+      grep -qi 'Found Hidden port' "$RAW/unhide-tcp.txt" && add HOCH rootkit "unhide-tcp: Versteckte Ports gefunden" "Log: $RAW/unhide-tcp.txt"
+    fi
+  elif [ "$MODE" = full ]; then need unhide-linux rootkit unhide; fi
+
+  heuristics
+}
+
+heuristics() {
+  # LD_PRELOAD-Rootkits
+  if [ -s /etc/ld.so.preload ]; then
+    add KRITISCH rootkit "/etc/ld.so.preload ist gesetzt (typisch für Userland-Rootkits)" "Inhalt: $(tr '\n' ' ' </etc/ld.so.preload)"
+  fi
+
+  # Prozesse aus temporären Verzeichnissen oder mit gelöschter Programmdatei
+  local p exe cmd
+  : >"$RAW/proc-tmp.txt"; : >"$RAW/proc-deleted.txt"
+  for p in /proc/[0-9]*; do
+    exe=$(readlink "$p/exe" 2>/dev/null) || continue
+    cmd=$(tr '\0' ' ' <"$p/cmdline" 2>/dev/null | cut -c1-80)
+    case $exe in
+      /tmp/*|/var/tmp/*|/dev/shm/*|/run/shm/*) echo "PID ${p#/proc/}: $exe  [$cmd]" >>"$RAW/proc-tmp.txt" ;;
+      *" (deleted)")
+        case $exe in /usr/*|/lib/*|/opt/*|/snap/*|/memfd:*) ;;
+          *) echo "PID ${p#/proc/}: $exe  [$cmd]" >>"$RAW/proc-deleted.txt" ;; esac ;;
+    esac
+  done
+  if [ -s "$RAW/proc-tmp.txt" ]; then take "$RAW/proc-tmp.txt" 8
+    add KRITISCH rootkit "Prozesse laufen aus temporären Verzeichnissen" "${ITEMS[@]}"
+  fi
+  if [ -s "$RAW/proc-deleted.txt" ]; then take "$RAW/proc-deleted.txt" 8
+    add HOCH rootkit "Prozesse laufen aus gelöschten Dateien außerhalb der Systempfade" "${ITEMS[@]}"
+  fi
+
+  # Bekannte Cryptominer / Malware-Familien
+  ps -eo pid=,user=,args= 2>/dev/null | awk -v me=$$ '$1!=me' \
+    | grep -iE 'xmrig|kdevtmpfsi|kinsing|minerd|cpuminer|xmr-stak|cryptonight|stratum\+(tcp|ssl)|nbminer|lolminer|\-\-donate-level|tsunami|kaiten|mirai|perfctl|perfcc|sysrv' \
+    | grep -v grep >"$RAW/proc-malware.txt"
+  if [ -s "$RAW/proc-malware.txt" ]; then take "$RAW/proc-malware.txt" 5
+    add KRITISCH rootkit "Prozesse mit Namen bekannter Cryptominer/Malware" "${ITEMS[@]}"
+  fi
+
+  # Verbindungen zu typischen Mining-Pool-Ports
+  ss -H -tnp state established 2>/dev/null | awk '
+    { n=split($4,a,":"); port=a[n]
+      if (port ~ /^(3333|4444|5555|6666|7777|9999|14433|14444|45560|45700)$/) print $4"  "$5 }' >"$RAW/net-miner.txt"
+  if [ -s "$RAW/net-miner.txt" ]; then take "$RAW/net-miner.txt" 5
+    add HOCH rootkit "Ausgehende Verbindungen zu typischen Mining-/C2-Ports" "${ITEMS[@]}"
+  fi
+
+  # Netzwerkkarten im Promiscuous-Mode (Sniffer)
+  local pr; pr=$(ip -o link show 2>/dev/null | awk -F': ' '/PROMISC/{printf "%s ",$2}')
+  [ -n "$pr" ] && add MITTEL rootkit "Netzwerkschnittstellen im Promiscuous-Mode (Sniffer?): $pr"
+
+  # Ausführbare Dateien & versteckte Verzeichnisse in tmp
+  : >"$RAW/tmp-elf.txt"; : >"$RAW/tmp-exec.txt"
+  local f
+  while IFS= read -r -d '' f; do
+    if [ "$(head -c4 "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = 7f454c46 ]; then echo "$f" >>"$RAW/tmp-elf.txt"
+    elif [ -x "$f" ]; then echo "$f" >>"$RAW/tmp-exec.txt"; fi
+  done < <(find /tmp /var/tmp /dev/shm -xdev -type f \( -perm /111 -o -size +10k \) -print0 2>/dev/null)
+  if [ -s "$RAW/tmp-elf.txt" ]; then take "$RAW/tmp-elf.txt" 8
+    add HOCH rootkit "Programmdateien (ELF) in temporären Verzeichnissen" "${ITEMS[@]}"
+  fi
+  if [ -s "$RAW/tmp-exec.txt" ]; then take "$RAW/tmp-exec.txt" 8
+    add NIEDRIG rootkit "Ausführbare Skripte in temporären Verzeichnissen" "${ITEMS[@]}"
+  fi
+  find /tmp /var/tmp /dev/shm -xdev -mindepth 1 -maxdepth 3 -name '.*' \
+    ! -name '.X11-unix' ! -name '.ICE-unix' ! -name '.font-unix' ! -name '.XIM-unix' ! -name '.Test-unix' \
+    ! -name '.lock' ! -name '.org.chromium.*' ! -name '.s.PGSQL.*' ! -name '.X*-lock' 2>/dev/null >"$RAW/tmp-hidden.txt"
+  if [ -s "$RAW/tmp-hidden.txt" ]; then take "$RAW/tmp-hidden.txt" 8
+    add MITTEL rootkit "Versteckte Dateien/Verzeichnisse in temporären Verzeichnissen" "${ITEMS[@]}"
+  fi
+
+  # Verdächtige Befehle in Autostart-Orten (Cron, systemd, rc.local, Shell-Profile)
+  grep -HnsIE 'curl[^|#]*\|[[:space:]]*(ba|z|da)?sh|wget[^|#]*\|[[:space:]]*(ba|z|da)?sh|base64[[:space:]]+(-d|--decode)|/dev/tcp/|\bnc(at)?\b[^|]*-e[[:space:]]|python[23]?[[:space:]]+-c|/dev/shm/|/tmp/\.|chattr[[:space:]]+\+i|LD_PRELOAD=' \
+    /etc/crontab /etc/cron.d/* /etc/cron.hourly/* /etc/cron.daily/* /etc/cron.weekly/* /etc/cron.monthly/* \
+    /var/spool/cron/crontabs/* /etc/rc.local /etc/profile /etc/profile.d/* /etc/bash.bashrc \
+    /root/.bashrc /root/.profile /etc/systemd/system/*.service /etc/systemd/system/*/*.service /etc/update-motd.d/* 2>/dev/null | cut -c1-200 >"$RAW/autostart-susp.txt"
+  if [ -s "$RAW/autostart-susp.txt" ]; then take "$RAW/autostart-susp.txt" 8
+    add HOCH rootkit "Verdächtige Befehle in Autostart-Dateien (Cron/systemd/Profile)" "${ITEMS[@]}"
+  fi
+}
+
+# ============================================================================
+#  MODUL: malware – ClamAV
+# ============================================================================
+# Ordner, die der Virenscan auslässt (eine Zeile pro Pfad)
+nextcloud_datadirs() {
+  local dir=$CHECK_DIR; [ -f "$dir/webcheck.py" ] || dir=$SRC_DIR/checks
+  [ -f "$dir/webcheck.py" ] && WEB_PATHS="$WEB_PATHS" timeout 120 python3 -I "$dir/webcheck.py" nc-datadirs 2>/dev/null
+}
+backup_dirs() { local p; for p in /backup /backups /var/backups /root/backup /root/backups /home/*/backup /home/*/backups; do [ -d "$p" ] && echo "$p"; done; }
+clam_excludes() {
+  local p
+  printf '%s\n' /proc /sys /dev /run /snap /var/lib/docker /var/lib/containerd /var/lib/lxcfs /var/lib/clamav \
+    "$LOG_DIR" "$STATE_DIR" /swapfile /swap.img
+  [ "$CLAM_EXCLUDE_DB" = 1 ] && printf '%s\n' /var/lib/mysql /var/lib/postgresql /var/lib/mongodb /var/lib/redis
+  [ "$CLAM_EXCLUDE_BACKUPS" = 1 ] && backup_dirs
+  if [ "$CLAM_EXCLUDE_LOGS" = 1 ]; then echo /var/log; for p in /home/*/logs /home/*/domains/*/logs; do [ -d "$p" ] && echo "$p"; done; fi
+  if [ "$CLAM_EXCLUDE_MAIL" = 1 ]; then echo /var/mail; for p in /home/*/Maildir /home/*/homes/*/Maildir; do [ -d "$p" ] && echo "$p"; done; fi
+  [ "$CLAM_EXCLUDE_NEXTCLOUD" = 1 ] && nextcloud_datadirs
+  for p in $CLAM_EXCLUDE_CUSTOM; do echo "${p%/}"; done
+  return 0
+}
+
+# Anzahl paralleler clamscan-Prozesse (je ca. 1,5 GB Arbeitsspeicher)
+clam_auto_workers() {
+  local cpus mem n bymem
+  cpus=$(nproc 2>/dev/null || echo 1)
+  mem=$(awk '/^MemAvailable:/{print int($2/1048576)}' /proc/meminfo 2>/dev/null); mem=${mem:-2}
+  n=$(( cpus > 2 ? cpus - 1 : 1 ))
+  bymem=$(( (mem - 2) * 10 / 16 )); (( bymem < 1 )) && bymem=1
+  (( n > bymem )) && n=$bymem
+  (( n > 6 )) && n=6
+  echo "$n"
+}
+clam_workers() { if [ "${CLAM_PARALLEL:-0}" -gt 0 ] 2>/dev/null; then echo "$CLAM_PARALLEL"; else clam_auto_workers; fi; }
+
+# Fortschritt für die Weboberfläche: erledigte Dateien zählen, aktuellen Ordner zeigen
+clam_progress() {
+  local out
+  while sleep 8; do
+    SUB_DONE=$(cat "$RAW"/clam.out.* 2>/dev/null | wc -l)
+    out=$(ls -t "$RAW"/clam.out.* 2>/dev/null | head -1)
+    SUB_TEXT=$(tail -n1 "$out" 2>/dev/null | sed -E 's/: [^:]*$//'); SUB_TEXT=${SUB_TEXT%/*}
+    write_status true malware "$MOD_I" "$MOD_N"
+  done
+}
+
+mod_malware() {
+  need clamscan malware "clamav clamav-freshclam" || return 0
+  if ! systemctl is-active -q clamav-freshclam 2>/dev/null; then
+    freshclam --quiet >"$RAW/freshclam.log" 2>&1 || add NIEDRIG malware "ClamAV-Signaturupdate fehlgeschlagen" "Log: $RAW/freshclam.log"
+  fi
+  # (Alter der Signaturen prüft der Bereich „Prüfwerkzeuge“)
+
+  # 1. Dateiliste erstellen – mit allen Ausnahmen, ohne Netzlaufwerke und Pseudo-Dateisysteme
+  local paths p roots=() prune=() e
+  if [ "$MODE" = full ]; then paths="$CLAM_PATHS_FULL /dev/shm"; else paths=$CLAM_PATHS_QUICK; fi
+  for p in $paths; do [ -e "$p" ] && roots+=("$p"); done
+  clam_excludes | sort -u >"$RAW/clam-excludes.txt"
+  while IFS= read -r e; do [ -n "$e" ] && prune+=(-path "$e" -o); done <"$RAW/clam-excludes.txt"
+  SUB_TEXT="Dateiliste wird erstellt …"; SUB_START=$(date +%s); write_status true malware "$MOD_I" "$MOD_N"
+  log "   Erstelle Dateiliste für den Virenscan …"
+  find "${roots[@]}" \( "${prune[@]}" -fstype proc -o -fstype sysfs -o -fstype devtmpfs -o -fstype devpts \
+       -o -fstype cgroup -o -fstype cgroup2 -o -fstype squashfs -o -fstype overlay -o -fstype autofs \
+       -o -fstype nfs -o -fstype nfs4 -o -fstype cifs -o -fstype smb3 -o -fstype fuse.sshfs -o -fstype fuse.lxcfs \
+       -o -fstype fuse.s3fs -o -fstype davfs \) -prune -o -type f -size -"${CLAM_MAX_FILESIZE%M}"M -print 2>/dev/null \
+    | awk '!seen[$0]++' >"$RAW/clam.list"
+  local total; total=$(wc -l <"$RAW/clam.list")
+
+  # 2. Auf parallele clamscan-Prozesse verteilen (reihum, damit alle ähnlich viel Arbeit haben)
+  local n; n=$(clam_workers); (( n > total )) && n=$(( total > 0 ? total : 1 ))
+  rm -f "$RAW"/clam.chunk.* "$RAW"/clam.out.* "$RAW"/clam.err.*
+  split -n "r/$n" -d -a 2 "$RAW/clam.list" "$RAW/clam.chunk."
+  SUB_TOTAL=$total; SUB_DONE=0; SUB_TEXT=""; SUB_START=$(date +%s); write_status true malware "$MOD_I" "$MOD_N"
+  log "   ClamAV prüft $total Dateien mit $n Prozess(en) …"
+  local pids=() c id
+  for c in "$RAW"/clam.chunk.*; do
+    [ -s "$c" ] || continue
+    id=${c##*.}
+    nice -n 19 ionice -c3 clamscan --no-summary --max-filesize="$CLAM_MAX_FILESIZE" --max-scansize=400M \
+      -f "$c" >"$RAW/clam.out.$id" 2>"$RAW/clam.err.$id" &
+    pids+=($!)
+  done
+  clam_progress & local prog=$!
+
+  # 3. Warten und Ergebnisse auswerten (Abbruch per Signal greift hier sofort)
+  local rc=0 r pid
+  for pid in "${pids[@]}"; do r=0; wait "$pid" || r=$?; (( r > rc )) && rc=$r; done
+  kill "$prog" 2>/dev/null; wait "$prog" 2>/dev/null
+  SUB_DONE=$(cat "$RAW"/clam.out.* 2>/dev/null | wc -l); write_status true malware "$MOD_I" "$MOD_N"
+  cat "$RAW"/clam.out.* 2>/dev/null | grep ' FOUND$' | sed 's/ FOUND$//' >"$RAW/clam-hits.txt"
+  cat "$RAW"/clam.err.* 2>/dev/null | grep -v '^$' >"$RAW/clamscan.err"
+  rm -f "$RAW"/clam.chunk.* "$RAW"/clam.out.* "$RAW"/clam.err.* "$RAW/clam.list"
+
+  local hits dur=$(( $(date +%s) - SUB_START ))
+  hits=$(grep -c . "$RAW/clam-hits.txt")
+  if (( hits > 0 )); then take "$RAW/clam-hits.txt" 15
+    add KRITISCH malware "ClamAV: $hits infizierte Dateien gefunden" "${ITEMS[@]}" "Nicht automatisch gelöscht – bitte prüfen und entfernen"
+  fi
+  # clamscan: 0 = sauber, 1 = Funde, 2 = Fehler, >128 = durch Signal beendet
+  if (( rc >= 2 )); then
+    add MITTEL malware "ClamAV-Virenscan abgebrochen oder fehlgeschlagen – Ergebnis unvollständig" \
+      "Rückgabewert $rc$( (( rc > 128 )) && echo " (beendet durch Signal $((rc - 128)))")" \
+      "Geprüft: $SUB_DONE von $total Dateien" "Log: $RAW/clamscan.err"
+  elif (( hits == 0 )); then
+    add INFO malware "ClamAV: keine Funde in $total Dateien"
+  fi
+  local ex=0
+  while IFS= read -r e; do
+    [[ $e =~ ^(/proc|/sys|/dev|/run|/snap|/var/lib/(docker|containerd|lxcfs|clamav)|/swapfile|/swap\.img)$ ]] && continue
+    [ "$e" = "$LOG_DIR" ] || [ "$e" = "$STATE_DIR" ] || { [ -e "$e" ] && ex=$((ex+1)); }
+  done <"$RAW/clam-excludes.txt"
+  add INFO malware "Virenscan: $total Dateien mit $n Prozess(en) in $(fmt_dur "$dur") geprüft" \
+    "Durchsucht: ${roots[*]}" "Ausgenommen: $ex Ordner (Liste: $RAW/clam-excludes.txt)" \
+    "Größere Dateien als $CLAM_MAX_FILESIZE werden übersprungen"
+}
+
+# ============================================================================
+#  MODUL: web – Webshells, PHP in Upload-Ordnern, Linux Malware Detect
+# ============================================================================
+mod_web() {
+  local roots=() p
+  for p in $WEB_PATHS; do [ -d "$p" ] && roots+=("$p"); done
+  [ ${#roots[@]} -eq 0 ] && return 0
+
+  find "${roots[@]}" -xdev \( -path '*/wp-content/uploads/*' -o -path '*/images/*' -o -path '*/media/*' -o -path '*/files/*' \) \
+    -type f -iname '*.ph*' ! -name '*.phpx' 2>/dev/null >"$RAW/web-php-uploads.txt"
+  if [ -s "$RAW/web-php-uploads.txt" ]; then take "$RAW/web-php-uploads.txt" 10
+    add HOCH web "PHP-Dateien in Upload-/Medienordnern (häufiges Webshell-Versteck)" "${ITEMS[@]}"
+  fi
+
+  grep -rIlsE --include='*.php' --include='*.phtml' --include='*.php[0-9]' \
+    'eval[[:space:]]*\([[:space:]]*(base64_decode|gzinflate|gzuncompress|str_rot13|strrev)[[:space:]]*\(|assert[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)|(system|passthru|shell_exec|exec|popen|proc_open)[[:space:]]*\([[:space:]]*\$_(GET|POST|REQUEST|COOKIE)|\$_(POST|GET|REQUEST|COOKIE)\[[^]]+\][[:space:]]*\(|FilesMan|c99shell|r57shell|b374k|WSO [0-9]|\$GLOBALS\[.{0,40}\]\[[0-9]+\]\(' \
+    "${roots[@]}" 2>/dev/null >"$RAW/web-shell-sig.txt"
+  if [ -s "$RAW/web-shell-sig.txt" ]; then take "$RAW/web-shell-sig.txt" 10
+    add HOCH web "$(grep -c . "$RAW/web-shell-sig.txt") PHP-Dateien mit typischen Webshell-Mustern" "${ITEMS[@]}" "Einzeln prüfen – vereinzelt auch in legitimen Plugins"
+  fi
+
+  if have maldet; then
+    log "   Linux Malware Detect durchsucht: ${roots[*]}"
+    nice -n 19 maldet -a "$(IFS=,; echo "${roots[*]}")" >"$RAW/maldet.txt" 2>&1
+    local hits rep
+    hits=$(grep -oE 'malware hits [0-9]+' "$RAW/maldet.txt" | grep -oE '[0-9]+' | tail -1)
+    rep=$(grep -oE 'maldet --report [0-9.-]+' "$RAW/maldet.txt" | tail -1)
+    if [ "${hits:-0}" -gt 0 ]; then add KRITISCH web "Linux Malware Detect: $hits Funde" "Bericht: $rep"
+    else add INFO web "Linux Malware Detect: keine Funde"; fi
+  else
+    add INFO web "Tipp: Linux Malware Detect (maldet) erkennt Web-Malware besser als ClamAV allein" "https://www.rfxn.com/projects/linux-malware-detect/"
+  fi
+}
+
+# ============================================================================
+#  MODULE: sites / apps – Websites, Domains und Webanwendungen (webcheck.py)
+# ============================================================================
+run_webcheck() {
+  local dir=$CHECK_DIR
+  [ -f "$dir/webcheck.py" ] || dir=$SRC_DIR/checks
+  if [ ! -f "$dir/webcheck.py" ]; then
+    add NIEDRIG "$1" "Prüfprogramm webcheck.py fehlt" "Neu installieren: sudo ./ubusec --install"; return 0
+  fi
+  SITES_EXCLUDE="$SITES_EXCLUDE" SITES_EXTRA="$SITES_EXTRA" SITES_TESTSSL="$SITES_TESTSSL" \
+  WPSCAN_API_TOKEN="$WPSCAN_API_TOKEN" WEB_PATHS="$WEB_PATHS" RAW="$RAW" STATE_DIR="$STATE_DIR" \
+  UBUSEC_VERSION="$UBUSEC_VERSION" UBUSEC_REPO="$UBUSEC_REPO" UPDATE_CHECK="$UPDATE_CHECK" TOOLS_JSON="$STATE_DIR/tools.json" \
+    timeout 4h python3 -I "$dir/webcheck.py" "$1" --raw "$RAW" --mode "$MODE" >"$RAW/$1.tsv" 2>"$RAW/$1.err"
+  local sev msg det arr
+  while IFS=$'\t' read -r sev msg det; do
+    [ -n "${RANK[$sev]+x}" ] || continue
+    arr=(); [ -n "$det" ] && IFS=$'\x1f' read -r -a arr <<<"$det"
+    add "$sev" "$1" "$msg" "${arr[@]}"
+  done <"$RAW/$1.tsv"
+  [ -s "$RAW/$1.err" ] && grep -q Traceback "$RAW/$1.err" && add NIEDRIG "$1" "Teilprüfung mit Programmfehler" "Log: $RAW/$1.err"
+  return 0
+}
+mod_sites() { run_webcheck sites; }
+mod_apps()  { run_webcheck apps; }
+mod_tools() {
+  run_webcheck tools
+  [ -f "$STATE_DIR/tools.json" ] && { chgrp "$(grp)" "$STATE_DIR/tools.json"; chmod 640 "$STATE_DIR/tools.json"; }
+  return 0
+}
+
+# ============================================================================
+#  Bericht
+# ============================================================================
+render_text() { # render_text MAX_DETAILS
+  local max=$1 sev mod msg det rank cnt line k
+  local -A cnt_by=([KRITISCH]=0 [HOCH]=0 [MITTEL]=0 [NIEDRIG]=0 [INFO]=0)
+  while IFS=$'\t' read -r rank sev _; do cnt_by[$sev]=$((cnt_by[$sev]+1)); done <"$SORTED"
+  local hr="════════════════════════════════════════════════════════════════════════"
+  echo "$hr"
+  c bold " ubusec $UBUSEC_VERSION · $(hostname -f 2>/dev/null || hostname) · Ubuntu $OS_VERSION · $MODE_LABEL"; echo
+  echo " $(date -d "@$T0" '+%d.%m.%Y %H:%M') · Dauer $(fmt_dur $(( $(date +%s) - T0 )))"
+  echo "$hr"
+  printf ' '
+  for k in KRITISCH HOCH MITTEL NIEDRIG INFO; do
+    if (( cnt_by[$k] > 0 )); then c "$k" "$k ${cnt_by[$k]}"; else c dim "$k 0"; fi
+    [ "$k" != INFO ] && printf '  │  '
+  done
+  echo; echo
+  if (( $(grep -c . "$SORTED") == 0 )); then c ok " ✔ Keine Auffälligkeiten."; echo; fi
+  local lastmod=""
+  while IFS=$'\t' read -r rank sev mod msg det; do
+    if [ "$mod" != "$lastmod" ]; then
+      echo; c bold "▌ ${MOD_TITLE[$mod]:-$mod}"; echo; lastmod=$mod
+    fi
+    printf '  '; c "$sev" "$(printf '%-8s' "$sev")"; printf '  %s' "$msg"
+    is_new "$sev" "$mod" "$msg" && { printf '  '; c MITTEL "[NEU]"; }
+    echo
+    if [ -n "$det" ]; then
+      local n=0 d arr=()
+      IFS=$'\x1f' read -r -a arr <<<"$det"
+      for d in "${arr[@]}"; do
+        n=$((n+1))
+        if [ "$max" -gt 0 ] && (( n > max )); then
+          c dim "            … (vollständig im Bericht)"; echo; break
+        fi
+        c dim "            ↳ $d"; echo
+      done
+    fi
+  done < <(ordered)
+  echo
+  echo "$hr"
+  printf ' Module: '
+  for k in $RUN_MODULES; do printf '%s %s  ' "$k" "$(fmt_dur "${MOD_TIME[$k]:-0}")"; done; echo
+  (( SUPPRESSED > 0 )) && echo " $SUPPRESSED Meldung(en) per $IGNORE_FILE ausgeblendet"
+  echo " Bericht: $REPORT_TXT"
+  echo " HTML:    $REPORT_HTML"
+  echo " Rohdaten der Tools: $RAW/"
+}
+
+html_esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+render_html() {
+  local rank sev mod msg det d
+  cat <<EOF
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ubusec $(hostname)</title><style>
+:root{--bg:#f6f7f9;--fg:#1d2330;--mut:#667085;--card:#fff;--line:#e4e7ec}
+@media (prefers-color-scheme:dark){:root{--bg:#12151b;--fg:#e6e9ef;--mut:#98a2b3;--card:#1b2029;--line:#2b3240}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px}h1{font-size:22px;margin:0}
+.meta{color:var(--mut);margin:4px 0 18px}.sum{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.b{padding:3px 10px;border-radius:99px;font-weight:600;font-size:13px;color:#fff;white-space:nowrap}
+.KRITISCH{background:#b42318}.HOCH{background:#d92d20}.MITTEL{background:#dc6803}.NIEDRIG{background:#1570ef}.INFO{background:#667085}
+h2{font-size:16px;margin:26px 0 8px;border-bottom:1px solid var(--line);padding-bottom:4px}
+.f{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:6px 0;display:flex;gap:12px}
+.f .b{align-self:flex-start;min-width:64px;text-align:center}.f ul{margin:4px 0 0;padding-left:18px;color:var(--mut);font-size:13px;word-break:break-all}
+.new{color:#dc6803;font-size:12px;font-weight:700;margin-left:6px}
+</style></head><body><main>
+<h1>Sicherheitsbericht $(hostname -f 2>/dev/null | html_esc)</h1>
+<div class="meta">Ubuntu $OS_VERSION · $MODE_LABEL · $(date -d "@$T0" '+%d.%m.%Y %H:%M') · ubusec $UBUSEC_VERSION</div><div class="sum">
+EOF
+  local k
+  for k in KRITISCH HOCH MITTEL NIEDRIG INFO; do
+    echo "<span class=\"b $k\">$k $(awk -F'\t' -v s=$k '$2==s' "$SORTED" | grep -c .)</span>"
+  done
+  echo "</div>"
+  local lastmod=""
+  while IFS=$'\t' read -r rank sev mod msg det; do
+    [ "$mod" != "$lastmod" ] && { echo "<h2>${MOD_TITLE[$mod]:-$mod}</h2>"; lastmod=$mod; }
+    printf '<div class="f"><span class="b %s">%s</span><div>%s' "$sev" "$sev" "$(html_esc <<<"$msg")"
+    is_new "$sev" "$mod" "$msg" && printf '<span class="new">NEU</span>'
+    if [ -n "$det" ]; then
+      local arr=(); IFS=$'\x1f' read -r -a arr <<<"$det"
+      echo "<ul>"; for d in "${arr[@]}"; do echo "<li>$(html_esc <<<"$d")</li>"; done; echo "</ul>"
+    fi
+    echo "</div></div>"
+  done < <(ordered)
+  echo "</main></body></html>"
+}
+
+ordered() { # Meldungen nach Modulreihenfolge, darin nach Schwere
+  awk -F'\t' -v order="$ALL_MODULES" 'BEGIN{n=split(order,o," ");for(i=1;i<=n;i++)idx[o[i]]=i}{print idx[$3]"\t"$0}' "$SORTED" \
+    | sort -t$'\t' -k1,1n -k2,2nr -s | cut -f2-
+}
+
+write_json() {
+  local rank sev mod msg det
+  : >"$RAW/findings.flag.tsv"
+  while IFS=$'\t' read -r rank sev mod msg det; do
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$rank" "$sev" "$mod" "$msg" "$det" "$(is_new "$sev" "$mod" "$msg" && echo 1 || echo 0)"
+  done < <(ordered) >"$RAW/findings.flag.tsv"
+  local mt="" m
+  for m in $RUN_MODULES; do mt+="$m=${MOD_TIME[$m]:-0},"; done
+  J_HOST=$(hostname -f 2>/dev/null || hostname) J_OS="$OS_VERSION" J_CODENAME="$OS_CODENAME" J_MODE="$MODE" \
+  J_LABEL="$MODE_LABEL" J_START="$T0" J_END="$(date +%s)" J_TRIGGER="$TRIGGER" J_MODTIMES="$mt" \
+  J_RAW="$RAW" J_TXT="$REPORT_TXT" J_HTML="$REPORT_HTML" J_VERSION="$UBUSEC_VERSION" J_SUPP="$SUPPRESSED" \
+  J_LYNIS="$(awk -F= '/^hardening_index=/{print $2; exit}' "$RAW/lynis-report.dat" 2>/dev/null)" \
+  J_ID="$TS-$MODE" python3 - "$RAW/findings.flag.tsv" "$REPORT_JSON" <<'PY2'
+import sys, os, json
+W = {"KRITISCH": 25, "HOCH": 10, "MITTEL": 4, "NIEDRIG": 1, "INFO": 0}
+fs, counts = [], {k: 0 for k in W}
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    p = line.rstrip("\n").split("\t")
+    if len(p) < 6: continue
+    rank, sev, mod, msg, det, new = p[:6]
+    counts[sev] = counts.get(sev, 0) + 1
+    fs.append({"severity": sev, "rank": int(rank), "module": mod, "message": msg,
+               "details": [d for d in det.split("\x1f") if d], "new": new == "1"})
+e = os.environ
+mt = {}
+for kv in e["J_MODTIMES"].split(","):
+    if "=" in kv: k, v = kv.split("="); mt[k] = int(v)
+doc = {"id": e["J_ID"], "version": e["J_VERSION"], "host": e["J_HOST"], "os": e["J_OS"],
+       "codename": e["J_CODENAME"], "mode": e["J_MODE"], "label": e["J_LABEL"],
+       "started": int(e["J_START"]), "finished": int(e["J_END"]), "trigger": e["J_TRIGGER"],
+       "modules": mt, "counts": counts, "suppressed": int(e["J_SUPP"] or 0),
+       "score": max(0, 100 - sum(W[k] * v for k, v in counts.items() if k in W)),
+       "lynis_index": int(e["J_LYNIS"]) if e["J_LYNIS"].isdigit() else None,
+       "raw_dir": e["J_RAW"], "report_txt": e["J_TXT"], "report_html": e["J_HTML"], "findings": fs}
+tmp = sys.argv[2] + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f: json.dump(doc, f, ensure_ascii=False, indent=1)
+os.replace(tmp, sys.argv[2])
+PY2
+}
+
+fmt_dur() { local s=$1; if (( s >= 60 )); then printf '%dm%02ds' $((s/60)) $((s%60)); else printf '%ds' "$s"; fi; }
+
+declare -A PREV_KEYS=()
+load_prev() {
+  local f=$STATE_DIR/last-findings.$MODE.tsv sev mod msg
+  [ -r "$f" ] || return 0
+  while IFS=$'\t' read -r _ sev mod msg _; do PREV_KEYS["$sev|$mod|$msg"]=1; done <"$f"
+  HAVE_PREV=1
+}
+HAVE_PREV=0
+is_new() { [ "$HAVE_PREV" = 1 ] && [ "$1" != INFO ] && [ -z "${PREV_KEYS["$1|$2|$3"]:-}" ]; }
+
+notify() {
+  [ "$NOTIFY" = 1 ] || return 0
+  [ -n "$MAIL_TO$NTFY_URL" ] || return 0
+  local min=${RANK[$NOTIFY_MIN]:-3} relevant=0 rank sev mod msg
+  while IFS=$'\t' read -r rank sev mod msg _; do
+    (( rank >= min )) || continue
+    if [ "$NOTIFY_ONLY_NEW" = 1 ] && [ "$HAVE_PREV" = 1 ]; then is_new "$sev" "$mod" "$msg" || continue; fi
+    relevant=$((relevant+1))
+  done <"$SORTED"
+  (( relevant > 0 )) || return 0
+  send_message "[ubusec] $(hostname): $SUMMARY" "$REPORT_TXT" "$SUMMARY – Bericht: $REPORT_TXT" || log "Hinweis: $NOTIFY_RESULT"
+  return 0
+}
+
+# send_message BETREFF TEXTDATEI KURZTEXT  → 0, wenn mindestens ein Kanal funktionierte
+NOTIFY_RESULT=""
+send_message() {
+  local subj=$1 body=$2 short=$3 ok=1 r=""
+  if [ -n "$MAIL_TO" ]; then
+    if have mail; then
+      # shellcheck disable=SC2086
+      if mail -s "$subj" ${MAIL_TO//,/ } <"$body"; then ok=0; r+="E-Mail an $MAIL_TO übergeben. "; else r+="E-Mail-Versand fehlgeschlagen. "; fi
+    elif have sendmail; then
+      if { echo "Subject: $subj"; echo "To: $MAIL_TO"; echo "Content-Type: text/plain; charset=UTF-8"; echo; cat "$body"; } | sendmail -t; then
+        ok=0; r+="E-Mail an $MAIL_TO übergeben. "; else r+="E-Mail-Versand fehlgeschlagen. "; fi
+    else r+="Kein Mailprogramm installiert (apt install bsd-mailx). "; fi
+  fi
+  if [ -n "$NTFY_URL" ]; then
+    if curl -fsS -m 20 -H "Title: ubusec $(hostname)" -H "Priority: high" -d "$short" "$NTFY_URL" >/dev/null 2>&1; then
+      ok=0; r+="ntfy-Nachricht gesendet. "; else r+="ntfy-Versand fehlgeschlagen. "; fi
+  fi
+  [ -z "$MAIL_TO$NTFY_URL" ] && r="Kein Empfänger eingestellt."
+  NOTIFY_RESULT=$r
+  return $ok
+}
+
+# ============================================================================
+#  Installation / Baseline
+# ============================================================================
+write_units() {
+  cat >/etc/systemd/system/ubusec-quick.service <<EOF
+[Unit]
+Description=ubusec – Schnellscan (Updates, CVEs, Rootkits, Malware)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$INSTALL_PATH --quick --quiet --trigger timer
+Nice=19
+IOSchedulingClass=idle
+CPUWeight=20
+TimeoutStartSec=6h
+EOF
+  cat >/etc/systemd/system/ubusec-quick.timer <<'EOF'
+[Unit]
+Description=ubusec Schnellscan Mo–Sa
+
+[Timer]
+OnCalendar=Mon..Sat *-*-* 03:17
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+  sed -e 's/Schnellscan (Updates, CVEs, Rootkits, Malware)/Vollscan (alle Module)/' \
+      -e 's/--quick/--full/' -e 's/TimeoutStartSec=6h/TimeoutStartSec=14h/' \
+      /etc/systemd/system/ubusec-quick.service >/etc/systemd/system/ubusec-full.service
+  cat >/etc/systemd/system/ubusec-full.timer <<'EOF'
+[Unit]
+Description=ubusec Vollscan sonntags
+
+[Timer]
+OnCalendar=Sun *-*-* 03:17
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+}
+
+write_conf() {
+  [ -f "$CONF_FILE" ] && return 0
+  mkdir -p "$CONF_DIR"
+  cat >"$CONF_FILE" <<EOF
+# ubusec – Konfiguration (Bash-Syntax)
+
+# Benachrichtigung: E-Mail (benötigt mailutils/bsd-mailx oder sendmail) und/oder ntfy-URL
+MAIL_TO=""
+NTFY_URL=""                 # z.B. https://ntfy.sh/mein-geheimes-thema
+NOTIFY_MIN="HOCH"           # ab welcher Schwere benachrichtigt wird
+NOTIFY_ONLY_NEW=1           # nur bei neuen Meldungen (verhindert tägliche Wiederholung)
+
+# ClamAV-Suchpfade
+CLAM_PATHS_QUICK="$CLAM_PATHS_QUICK"
+CLAM_PATHS_FULL="$CLAM_PATHS_FULL"
+CLAM_EXCLUDE_DIRS="$CLAM_EXCLUDE_DIRS"
+CLAM_MAX_FILESIZE="$CLAM_MAX_FILESIZE"
+
+# Webroots für Webshell-Suche (Virtualmin: /home)
+WEB_PATHS="$WEB_PATHS"
+
+# Ports, die öffentlich lauschend gemeldet werden
+RISKY_PORTS_HIGH="$RISKY_PORTS_HIGH"
+RISKY_PORTS_MED="$RISKY_PORTS_MED"
+
+# Aufbewahrung der Berichte in Tagen
+KEEP_DAYS=$KEEP_DAYS
+EOF
+  cat >"$IGNORE_FILE" <<'EOF'
+# ubusec – bekannte Fehlalarme ausblenden
+# Eine erweiterte Regex pro Zeile; geprüft wird gegen "modul|meldung|details".
+# Beispiele:
+#   ^rootkit\|rkhunter: .*/usr/bin/lwp-request
+#   ^firewall\|Admin-/Web-Oberflächen.*10000/tcp
+EOF
+}
+
+configure_rkhunter() {
+  [ -f /etc/rkhunter.conf ] || return 0
+  local wl="" f
+  for f in /usr/bin/egrep /usr/bin/fgrep /usr/bin/which /usr/bin/ldd /usr/bin/lwp-request; do
+    [ -f "$f" ] && wl+="SCRIPTWHITELIST=$f"$'\n'
+  done
+  cat >/etc/rkhunter.conf.local <<EOF
+# von ubusec angelegt
+UPDATE_MIRRORS=1
+MIRRORS_MODE=0
+WEB_CMD=""
+PKGMGR=DPKG
+$wl
+EOF
+  if [ -f /etc/default/rkhunter ]; then
+    sed -i -e 's/^CRON_DAILY_RUN=.*/CRON_DAILY_RUN="false"/' \
+           -e 's/^CRON_DB_UPDATE=.*/CRON_DB_UPDATE="true"/' \
+           -e 's/^APT_AUTOGEN=.*/APT_AUTOGEN="true"/' /etc/default/rkhunter
+  fi
+}
+
+do_install() {
+  local with_aide=$1
+  echo "→ Installiere Pakete …"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  local pkgs="lynis rkhunter chkrootkit unhide clamav clamav-freshclam needrestart bzip2 curl python3 distro-info unattended-upgrades bind9-dnsutils"
+  [ "$with_aide" = 1 ] && pkgs+=" aide aide-common"
+  # shellcheck disable=SC2086
+  apt-get install -y -qq --no-install-recommends $pkgs || echo "  Warnung: nicht alle Pakete installierbar"
+  apt-get install -y -qq openscap-scanner 2>/dev/null || apt-get install -y -qq libopenscap8 2>/dev/null \
+    || echo "  Hinweis: OpenSCAP nicht verfügbar – CVE-Modul wird übersprungen"
+
+  apt-get install -y -qq testssl.sh 2>/dev/null || true
+  echo "→ Kopiere ubusec nach $INSTALL_PATH"
+  [ "$SELF_PATH" != "$INSTALL_PATH" ] && install -m 0750 -o root -g root "$SELF_PATH" "$INSTALL_PATH"
+  ensure_dirs
+  if [ -f "$SRC_DIR/checks/webcheck.py" ] && [ "$(readlink -f "$SRC_DIR/checks")" != "$CHECK_DIR" ]; then
+    install -d -m 0755 "$CHECK_DIR"; install -m 0644 "$SRC_DIR/checks/webcheck.py" "$CHECK_DIR/webcheck.py"
+  fi
+  write_conf
+  configure_rkhunter
+  echo "→ Aktualisiere Signaturen (ClamAV, rkhunter) …"
+  systemctl stop clamav-freshclam 2>/dev/null; freshclam --quiet 2>/dev/null; systemctl enable --now clamav-freshclam 2>/dev/null
+  rkhunter --update --nocolors >/dev/null 2>&1
+  # Baseline nur beim ersten Mal anlegen – ein Update darf unbemerkte Änderungen nicht „absegnen“
+  if [ -f "$BASE_DIR/.created" ]; then
+    echo "→ Bestehende Baseline vom $(cat "$BASE_DIR/.created") bleibt erhalten (neu anlegen: ubusec --accept)"
+    [ "$with_aide" = 1 ] && [ ! -f /var/lib/aide/aide.db ] && do_baseline 1
+  else
+    do_baseline "$with_aide"
+  fi
+  write_units
+  [ -f "$SCHEDULE_FILE" ] || write_schedule
+  apply_schedule
+  write_settings_json
+  cat <<EOF
+
+✔ ubusec installiert.
+  Erster Vollscan:     sudo ubusec --full
+  Zeitpläne:           Schnellscan Mo–Sa 03:17, Vollscan So 03:17  (systemctl list-timers 'ubusec*')
+  Konfiguration:       $CONF_FILE   (E-Mail/ntfy eintragen!)
+  Fehlalarme:          $IGNORE_FILE
+  Berichte:            $LOG_DIR
+EOF
+}
+
+do_baseline() {
+  local with_aide=${1:-0}
+  ensure_dirs
+  echo "→ Lege Baseline an (Konten, Ports, SSH-Schlüssel, Cron, Dienste, SUID) …"
+  write_baseline
+  if have rkhunter; then echo "→ rkhunter --propupd"; rkhunter --propupd --nocolors >/dev/null 2>&1; fi
+  if have aideinit && { [ "$with_aide" = 1 ] || [ -f /var/lib/aide/aide.db ]; }; then
+    echo "→ AIDE-Datenbank wird erstellt (kann viele Minuten dauern) …"
+    aideinit -y -f >/dev/null 2>&1 && [ -f /var/lib/aide/aide.db.new ] && cp /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+  fi
+  echo "✔ Baseline gespeichert: $(cat "$BASE_DIR/.created")"
+}
+
+do_uninstall() {
+  systemctl disable --now ubusec-quick.timer ubusec-full.timer ubusec-web.service ubusec-queue.path ubusec-ctl.path 2>/dev/null
+  rm -f /etc/systemd/system/ubusec-{quick,full}.{service,timer} /etc/systemd/system/ubusec-web.service \
+        /etc/systemd/system/ubusec-queue.{path,service} /etc/systemd/system/ubusec-ctl.{path,service} "$INSTALL_PATH"
+  rm -rf /etc/systemd/system/ubusec-{quick,full}.timer.d /usr/local/lib/ubusec/checks
+  rm -rf "$WEB_DIR"
+  systemctl daemon-reload
+  echo "ubusec entfernt. Konfiguration ($CONF_DIR), Daten ($STATE_DIR) und Berichte ($LOG_DIR) blieben erhalten."
+}
+
+# Aufträge der Weboberfläche abarbeiten. Die Dateien liegen in einem für die
+# Gruppe beschreibbaren Ordner und gelten daher als NICHT vertrauenswürdig:
+# erst atomar in einen root-eigenen Ordner verschieben, dann streng prüfen.
+audit() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG_DIR/web-audit.log"; }
+
+# ---------------------------------------------------------- Werkzeuge ---
+TOOL_PKGS="clamav clamav-freshclam clamav-daemon rkhunter chkrootkit lynis openscap-scanner libopenscap8 unhide needrestart bind9-dnsutils testssl.sh aide aide-common python3-flask python3-waitress qrencode"
+
+tools_state() { # tools_state true|false aktion
+  local f=$STATE_DIR/tools-update.state
+  printf '{"running":%s,"action":"%s","time":%s}\n' "$1" "$2" "$(date +%s)" >"$f.tmp"
+  chgrp "$(grp)" "$f.tmp"; chmod 640 "$f.tmp"; mv -f "$f.tmp" "$f"
+}
+
+check_tools() { # nur die Werkzeuge prüfen, ohne Bericht
+  ensure_dirs
+  (
+    RAW=$(mktemp -d "$STATE_DIR/work/tools.XXXXXX"); FINDINGS=$RAW/findings.tsv; : >"$FINDINGS"; MODE=quick
+    mod_tools
+    if [ -t 1 ]; then cut -f2,4 "$FINDINGS" | sed 's/\t/  /'; [ -s "$FINDINGS" ] || echo "Alle Werkzeuge sind aktuell."; fi
+    rm -rf "$RAW"
+  )
+}
+
+update_tools() { # Updates nur für ubusecs eigene Werkzeuge + frische Signaturen
+  local log=$STATE_DIR/tools-update.log pkgs="" p f
+  ensure_dirs; tools_state true update
+  {
+    echo "=== Werkzeuge aktualisieren – $(date '+%d.%m.%Y %H:%M')"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -q
+    for p in $TOOL_PKGS; do dpkg -s "$p" >/dev/null 2>&1 && pkgs+="$p "; done
+    echo "--- Pakete: $pkgs"
+    # shellcheck disable=SC2086
+    apt-get install -y -q --only-upgrade -o Dpkg::Options::=--force-confold $pkgs
+    echo "--- ClamAV-Signaturen"
+    if systemctl is-active -q clamav-freshclam; then systemctl restart clamav-freshclam && sleep 25 && echo "Signaturdienst neu gestartet (lädt neue Signaturen)"
+    else freshclam; fi
+    echo "--- rkhunter-Daten"; rkhunter --update --nocolors || true
+    echo "--- CVE-Daten werden beim nächsten Scan neu geladen"
+    for f in "$STATE_DIR"/oval/*.xml; do [ -f "$f" ] && touch -d '2 days ago' "$f"; done
+    echo "=== fertig – $(date '+%H:%M')"
+  } >"$log" 2>&1
+  chgrp "$(grp)" "$log"; chmod 640 "$log"
+  check_tools >/dev/null
+  tools_state false update
+}
+
+lynis_upstream() { # aktuelle Lynis-Version aus der Paketquelle des Herstellers (CISOfy)
+  local log=$STATE_DIR/tools-update.log rc=0
+  ensure_dirs; tools_state true lynis
+  {
+    echo "=== Lynis-Paketquelle des Herstellers einrichten – $(date '+%d.%m.%Y %H:%M')"
+    install -d -m 0755 /etc/apt/keyrings
+    curl -fsSL https://packages.cisofy.com/keys/cisofy-software-public.key \
+      | gpg --dearmor --yes -o /etc/apt/keyrings/cisofy-software-public.gpg
+    # Schlüssel gilt nur für diese Quelle (signed-by), nicht für alle Paketquellen
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/cisofy-software-public.gpg] https://packages.cisofy.com/community/lynis/deb/ stable main" \
+      >/etc/apt/sources.list.d/cisofy-lynis.list
+    printf 'Package: lynis\nPin: origin packages.cisofy.com\nPin-Priority: 600\n' >/etc/apt/preferences.d/lynis
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -q && apt-get install -y -q lynis
+    echo "--- installiert: $(lynis show version 2>/dev/null)"
+    echo "=== fertig"
+  } >"$log" 2>&1 || rc=1
+  [ $rc = 0 ] || echo "=== FEHLER – siehe oben" >>"$log"
+  chgrp "$(grp)" "$log"; chmod 640 "$log"
+  check_tools >/dev/null
+  tools_state false lynis
+  return $rc
+}
+
+self_update() { # ubusec von GitHub aktualisieren (nur auf ausdrücklichen Befehl)
+  local yes=$1 tmp info tag name url sums
+  have curl || die "curl fehlt"
+  echo "→ Frage GitHub nach der neuesten Version von $UBUSEC_REPO …"
+  info=$(curl -fsSL -m 30 -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$UBUSEC_REPO/releases/latest" \
+    | python3 -I -c 'import json, sys
+r = json.load(sys.stdin)
+a = {x["name"]: x["browser_download_url"] for x in r.get("assets", [])}
+tar = [n for n in a if n.startswith("ubusec-") and n.endswith(".tar.gz")]
+print(r.get("tag_name", "").lstrip("v"))
+print(tar[0] if tar else "")
+print(a.get(tar[0], "") if tar else "")
+print(a.get("SHA256SUMS", ""))
+print(r.get("html_url", ""))') || die "GitHub nicht erreichbar oder noch keine Version veröffentlicht."
+  { read -r tag; read -r name; read -r url; read -r sums; } <<<"$info"
+  [ -n "$tag" ] && [ -n "$url" ] && [ -n "$sums" ] || die "Die neueste Version auf GitHub enthält kein vollständiges Paket."
+  if ! python3 -I -c 'import re,sys; v=lambda s: tuple(int(x) for x in re.findall(r"\d+", s)[:4]); sys.exit(0 if v(sys.argv[1]) > v(sys.argv[2]) else 1)' "$tag" "$UBUSEC_VERSION"; then
+    echo "✔ ubusec $UBUSEC_VERSION ist aktuell (neueste Version: $tag)."; return 0
+  fi
+  echo "Neue Version: $tag (installiert: $UBUSEC_VERSION)"
+  echo "Änderungen: $(tail -1 <<<"$info")"
+  if [ "$yes" != 1 ]; then
+    [ -t 0 ] || die "Ohne Rückfrage nur mit --yes."
+    local ans; read -r -p "Jetzt aktualisieren? [j/N] " ans; [[ $ans =~ ^[jJyY] ]] || { echo "Abgebrochen."; return 0; }
+  fi
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' RETURN
+  curl -fsSL -m 300 -o "$tmp/$name" "$url" && curl -fsSL -m 60 -o "$tmp/SHA256SUMS" "$sums" || die "Download fehlgeschlagen."
+  ( cd "$tmp" && grep -E "  $name\$" SHA256SUMS | sha256sum -c --quiet - ) || die "Prüfsumme stimmt nicht – Update abgebrochen."
+  install -d -m 0700 "$tmp/x"; tar xzf "$tmp/$name" -C "$tmp/x"
+  [ -f "$tmp/x/ubusec/ubusec" ] || die "Paket unvollständig."
+  local args=(--install); [ -f "$WEB_DIR/ubusec_web.py" ] && args+=(--with-web)
+  bash "$tmp/x/ubusec/ubusec" "${args[@]}" </dev/null
+  echo "✔ Aktualisiert auf $tag."
+}
+
+# Einstellungen, die die Weboberfläche ändern darf – jeweils mit strenger Prüfung
+SETTING_KEYS="MAIL_TO NTFY_URL NOTIFY_MIN NOTIFY_ONLY_NEW KEEP_DAYS CLAM_PATHS_QUICK CLAM_MAX_FILESIZE WEB_PATHS SITES_EXCLUDE SITES_EXTRA SITES_TESTSSL WPSCAN_API_TOKEN CLAM_PARALLEL CLAM_EXCLUDE_DB CLAM_EXCLUDE_BACKUPS CLAM_EXCLUDE_LOGS CLAM_EXCLUDE_MAIL CLAM_EXCLUDE_NEXTCLOUD CLAM_EXCLUDE_CUSTOM UPDATE_CHECK"
+declare -A SETTING_RX=(
+  [MAIL_TO]='^([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}){0,4})?$'
+  [NTFY_URL]='^(https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~%-]*){0,6})?$'
+  [NOTIFY_MIN]='^(KRITISCH|HOCH|MITTEL)$'
+  [NOTIFY_ONLY_NEW]='^[01]$'
+  [KEEP_DAYS]='^([7-9]|[1-9][0-9]|[12][0-9][0-9]|3[0-5][0-9]|36[0-5])$'
+  [CLAM_PATHS_QUICK]='^/[A-Za-z0-9._/-]*( /[A-Za-z0-9._/-]*){0,19}$'
+  [CLAM_MAX_FILESIZE]='^(25|50|100|200|400)M$'
+  [WEB_PATHS]='^/[A-Za-z0-9._/-]*( /[A-Za-z0-9._/-]*){0,19}$'
+  [SITES_EXCLUDE]='^[A-Za-z0-9.*_ -]{0,500}$'
+  [SITES_EXTRA]='^[A-Za-z0-9. -]{0,500}$'
+  [SITES_TESTSSL]='^[01]$'
+  [WPSCAN_API_TOKEN]='^[A-Za-z0-9]{0,64}$'
+  [UPDATE_CHECK]='^[01]$'
+  [CLAM_PARALLEL]='^([0-9]|1[0-6])$'
+  [CLAM_EXCLUDE_DB]='^[01]$' [CLAM_EXCLUDE_BACKUPS]='^[01]$' [CLAM_EXCLUDE_LOGS]='^[01]$'
+  [CLAM_EXCLUDE_MAIL]='^[01]$' [CLAM_EXCLUDE_NEXTCLOUD]='^[01]$'
+  [CLAM_EXCLUDE_CUSTOM]='^(/[A-Za-z0-9._/-]*( /[A-Za-z0-9._/-]*){0,29})?$'
+)
+DAYS_RX='^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)(,(Mon|Tue|Wed|Thu|Fri|Sat|Sun)){0,6}$'
+TIME_RX='^([01][0-9]|2[0-3]):[0-5][0-9]$'
+
+write_settings() {
+  local k
+  { echo "# Von ubusec verwaltet (Weboberfläche → Einstellungen). Bitte nicht von Hand bearbeiten."
+    for k in $SETTING_KEYS; do printf '%s=%q\n' "$k" "${!k}"; done; } >"$SETTINGS_FILE.tmp"
+  chmod 640 "$SETTINGS_FILE.tmp"; mv -f "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"
+}
+
+write_schedule() {
+  { echo "# Von ubusec verwaltet (Weboberfläche → Einstellungen → Geplante Scans)."
+    for k in QUICK_ON QUICK_DAYS QUICK_TIME FULL_ON FULL_DAYS FULL_TIME; do printf '%s=%q\n' "$k" "${!k}"; done; } >"$SCHEDULE_FILE.tmp"
+  chmod 640 "$SCHEDULE_FILE.tmp"; mv -f "$SCHEDULE_FILE.tmp" "$SCHEDULE_FILE"
+}
+
+apply_schedule() {
+  local t U on days tm
+  for t in quick full; do
+    U=${t^^}; on=${U}_ON; days=${U}_DAYS; tm=${U}_TIME
+    install -d -m 0755 "/etc/systemd/system/ubusec-$t.timer.d"
+    printf '# von ubusec erzeugt\n[Timer]\nOnCalendar=\nOnCalendar=%s *-*-* %s:00\n' "${!days}" "${!tm}" \
+      >"/etc/systemd/system/ubusec-$t.timer.d/zeitplan.conf"
+  done
+  systemctl daemon-reload 2>/dev/null
+  for t in quick full; do
+    U=${t^^}; on=${U}_ON
+    if [ "${!on}" = 1 ]; then systemctl enable --now "ubusec-$t.timer" >/dev/null 2>&1
+    else systemctl disable --now "ubusec-$t.timer" >/dev/null 2>&1; fi
+  done
+}
+
+# Für die Weboberfläche lesbare Übersicht der gültigen Einstellungen (ohne Geheimnisse)
+write_settings_json() {
+  local f=$STATE_DIR/settings.json mailer=0
+  { have mail || have sendmail; } && mailer=1
+  (
+    export $SETTING_KEYS QUICK_ON QUICK_DAYS QUICK_TIME FULL_ON FULL_DAYS FULL_TIME
+    export UBUSEC_MAILER=$mailer UBUSEC_KEYS="$SETTING_KEYS QUICK_ON QUICK_DAYS QUICK_TIME FULL_ON FULL_DAYS FULL_TIME"
+    export UBUSEC_CPUS="$(nproc 2>/dev/null)" UBUSEC_MEM="$(awk '/^MemTotal:/{print int($2/1048576+0.5)}' /proc/meminfo)"
+    export UBUSEC_AUTO="$(clam_auto_workers)" UBUSEC_NCDIRS="$(nextcloud_datadirs | tr '\n' ' ')" UBUSEC_BACKUPDIRS="$(backup_dirs | tr '\n' ' ')"
+    python3 -I -c 'import json, os, time
+d = {k: os.environ.get(k, "") for k in os.environ["UBUSEC_KEYS"].split()}
+d["WPSCAN_API_TOKEN"] = "gesetzt" if d["WPSCAN_API_TOKEN"] else ""
+d["_mailer"] = os.environ["UBUSEC_MAILER"] == "1"
+d["_updated"] = int(time.time())
+d["_cpus"] = os.environ.get("UBUSEC_CPUS", "")
+d["_mem_gb"] = os.environ.get("UBUSEC_MEM", "")
+d["_auto_parallel"] = os.environ.get("UBUSEC_AUTO", "1")
+d["_nc_datadirs"] = os.environ.get("UBUSEC_NCDIRS", "").split()
+d["_backup_dirs"] = os.environ.get("UBUSEC_BACKUPDIRS", "").split()
+print(json.dumps(d, ensure_ascii=False))'
+  ) >"$f.tmp" 2>/dev/null && { chgrp "$(grp)" "$f.tmp"; chmod 640 "$f.tmp"; mv -f "$f.tmp" "$f"; }
+}
+
+# Aufträge der Weboberfläche abarbeiten. Die Dateien liegen in einem für die Gruppe
+# beschreibbaren Ordner und gelten als NICHT vertrauenswürdig: erst atomar in einen
+# root-eigenen Ordner verschieben, dann jeden Wert streng prüfen.
+#   *.req  Scan-Aufträge (können Stunden dauern)        → ubusec-queue.path
+#   *.ctl  Steuerung: Einstellungen, Baseline, Ignore …  → ubusec-ctl.path (sofort)
+declare -A REQ=()
+read_request() { # read_request DATEI → füllt REQ, 1 bei ungültiger Datei
+  local f=$1 w k v n=0
+  w=$STATE_DIR/work/$(basename "$f")
+  mv -f -- "$f" "$w" 2>/dev/null || return 1
+  if [ -L "$w" ] || [ ! -f "$w" ] || [ "$(stat -c %s "$w")" -gt 4096 ]; then
+    audit "ABGELEHNT ungültige Auftragsdatei $(basename "$f")"; rm -f -- "$w"; return 1
+  fi
+  REQ=()
+  while IFS='=' read -r k v && (( n++ < 40 )); do
+    [[ $k =~ ^[a-zA-Z_]{1,32}$ ]] && REQ[$k]=$v
+  done <"$w"
+  rm -f -- "$w"
+  [[ ${REQ[user]:-} =~ ^[A-Za-z0-9._-]{1,32}$ ]] || REQ[user]="?"
+  return 0
+}
+
+process_queue() { # process_queue req|ctl
+  local kind=${1:-req} f action user m
+  ensure_dirs
+  for f in "$QUEUE_DIR"/*."$kind"; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    read_request "$f" || continue
+    action=${REQ[action]:-}; user=${REQ[user]}
+    if [ "$kind" = req ]; then
+      [ "$action" = scan ] || { audit "ABGELEHNT $user: Aktion '$action' in der Scan-Warteschlange"; continue; }
+      local mode=${REQ[mode]:-} only=${REQ[only]:-}
+      [[ $mode =~ ^(quick|full)$ ]] || { audit "ABGELEHNT $user: Modus '$mode'"; continue; }
+      if [ -n "$only" ]; then
+        [[ $only =~ ^[a-z,]{1,120}$ ]] || { audit "ABGELEHNT $user: Module '$only'"; continue; }
+        for m in ${only//,/ }; do [[ " $ALL_MODULES " == *" $m "* ]] || { audit "ABGELEHNT $user: Modul '$m'"; continue 2; }; done
+      fi
+      audit "SCAN $user mode=$mode only=${only:-alle}"
+      # sofort „läuft“ melden, damit die Oberfläche keine Lücke bis zum Scan-Start sieht
+      MODE=$mode MODE_LABEL="Scan wird gestartet" TRIGGER=web T0=$(date +%s) write_status true "" 0 1
+      "$SELF_PATH" "--$mode" ${only:+--only "$only"} --trigger web --quiet
+      continue
+    fi
+    case $action in
+      accept)
+        audit "BASELINE übernommen durch $user"
+        "$SELF_PATH" --accept >/dev/null 2>&1 ;;
+      ignore|unignore)
+        local pattern=${REQ[pattern]:-}
+        if [ ${#pattern} -lt 3 ] || [ ${#pattern} -gt 300 ] || [[ $pattern =~ [[:cntrl:]] ]]; then
+          audit "ABGELEHNT $user: Ignore-Muster ungültig"; continue
+        fi
+        if [ "$action" = ignore ]; then
+          printf '# per Weboberfläche von %s am %s\n%s\n' "$user" "$(date '+%F %T')" "$pattern" >>"$IGNORE_FILE"
+          audit "IGNORE $user: $pattern"
+        else
+          P="$pattern" awk 'BEGIN { p = ENVIRON["P"] }
+            held != "" { if ($0 == p) { held = ""; next } print held; held = "" }
+            /^# per Weboberfl/ { held = $0; next }
+            $0 == p { next }
+            { print }
+            END { if (held != "") print held }' "$IGNORE_FILE" >"$IGNORE_FILE.tmp" && mv -f "$IGNORE_FILE.tmp" "$IGNORE_FILE"
+          audit "IGNORE ENTFERNT $user: $pattern"
+        fi
+        ensure_dirs ;;
+      settings)
+        local k v changed=""
+        for k in "${!REQ[@]}"; do
+          case $k in action|user) continue ;; esac
+          [[ " $SETTING_KEYS " == *" $k "* ]] || { audit "ABGELEHNT $user: unbekannte Einstellung '$k'"; continue 2; }
+          v=${REQ[$k]}
+          [[ $v =~ ${SETTING_RX[$k]} ]] || { audit "ABGELEHNT $user: ungültiger Wert für $k"; continue 2; }
+        done
+        for k in "${!REQ[@]}"; do
+          case $k in action|user) continue ;; esac
+          printf -v "$k" '%s' "${REQ[$k]}"; changed+="$k "
+        done
+        write_settings
+        audit "EINSTELLUNGEN $user: ${changed:-keine Änderung}" ;;
+      schedule)
+        local t U
+        for t in QUICK FULL; do
+          [[ ${REQ[${t}_ON]:-} =~ ^[01]$ ]] && [[ ${REQ[${t}_DAYS]:-} =~ $DAYS_RX ]] && [[ ${REQ[${t}_TIME]:-} =~ $TIME_RX ]] \
+            || { audit "ABGELEHNT $user: ungültiger Zeitplan ($t)"; continue 2; }
+        done
+        for t in QUICK FULL; do
+          printf -v "${t}_ON" '%s' "${REQ[${t}_ON]}"; printf -v "${t}_DAYS" '%s' "${REQ[${t}_DAYS]}"; printf -v "${t}_TIME" '%s' "${REQ[${t}_TIME]}"
+        done
+        write_schedule; apply_schedule
+        audit "ZEITPLAN $user: Schnell ${QUICK_ON}/${QUICK_DAYS}/${QUICK_TIME}, Voll ${FULL_ON}/${FULL_DAYS}/${FULL_TIME}" ;;
+      cancel)
+        audit "SCAN ABBRECHEN angefordert von $user"
+        systemctl stop ubusec-queue.service ubusec-quick.service ubusec-full.service 2>/dev/null
+        # auf der Kommandozeile gestartete Scans: PID aus der (root-eigenen) Statusdatei
+        local spid
+        spid=$(grep -o '"pid":[0-9]*' "$STATE_DIR/status.json" 2>/dev/null | cut -d: -f2)
+        if [ -n "$spid" ] && [ "$spid" != "$$" ] && tr '\0' ' ' <"/proc/$spid/cmdline" 2>/dev/null | grep -q "ubusec"; then
+          pkill -TERM -P "$spid" 2>/dev/null   # zuerst das laufende Werkzeug (clamscan …)
+          kill -TERM "$spid" 2>/dev/null
+          for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$spid" 2>/dev/null || break; sleep 1; done
+        fi
+        if grep -q '"running":true' "$STATE_DIR/status.json" 2>/dev/null; then
+          spid=$(grep -o '"pid":[0-9]*' "$STATE_DIR/status.json" | cut -d: -f2)
+          kill -0 "${spid:-0}" 2>/dev/null || sed -i 's/"running":true/"running":false/' "$STATE_DIR/status.json"
+        fi ;;
+      toolscheck)
+        audit "WERKZEUGE PRÜFEN $user"; check_tools >/dev/null ;;
+      toolsupdate)
+        audit "WERKZEUGE AKTUALISIEREN $user"; update_tools ;;
+      lynisrepo)
+        audit "LYNIS-PAKETQUELLE $user"; lynis_upstream || audit "LYNIS-PAKETQUELLE fehlgeschlagen" ;;
+      testnotify)
+        local tf=$STATE_DIR/work/test-mail.txt rc=0
+        printf 'Dies ist eine Testnachricht von ubusec auf %s (%s).\nWenn du sie liest, funktionieren die Benachrichtigungen.\n' \
+          "$(hostname -f 2>/dev/null || hostname)" "$(date '+%d.%m.%Y %H:%M')" >"$tf"
+        send_message "[ubusec] Testnachricht von $(hostname)" "$tf" "Testnachricht von ubusec auf $(hostname)" || rc=1
+        rm -f "$tf"
+        printf '{"ok":%s,"message":"%s","time":%s}\n' "$([ $rc = 0 ] && echo true || echo false)" \
+          "${NOTIFY_RESULT//\"/\'}" "$(date +%s)" >"$STATE_DIR/notify-test.json"
+        chgrp "$(grp)" "$STATE_DIR/notify-test.json"; chmod 640 "$STATE_DIR/notify-test.json"
+        audit "TESTNACHRICHT $user: $NOTIFY_RESULT" ;;
+      *) audit "ABGELEHNT $user: Aktion '$action'" ;;
+    esac
+    write_settings_json
+  done
+  return 0
+}
+
+# ---------------------------------------------------------------- Web-Teil ---
+write_web_units() {
+  cat >/etc/systemd/system/ubusec-web.service <<EOF
+[Unit]
+Description=ubusec Weboberfläche
+After=network.target
+
+[Service]
+User=$WEB_GROUP
+Group=$WEB_GROUP
+ExecStart=/usr/bin/python3 $WEB_DIR/ubusec_web.py serve
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+ReadWritePaths=$QUEUE_DIR $STATE_DIR/web
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  cat >/etc/systemd/system/ubusec-queue.path <<EOF
+[Unit]
+Description=ubusec Aufträge der Weboberfläche überwachen
+
+[Path]
+PathExistsGlob=$QUEUE_DIR/*.req
+MakeDirectory=no
+
+[Install]
+WantedBy=paths.target
+EOF
+  cat >/etc/systemd/system/ubusec-queue.service <<EOF
+[Unit]
+Description=ubusec Aufträge der Weboberfläche ausführen
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=$INSTALL_PATH --from-queue
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=14h
+EOF
+  cat >/etc/systemd/system/ubusec-ctl.path <<EOF
+[Unit]
+Description=ubusec Einstellungen aus der Weboberfläche überwachen
+
+[Path]
+PathExistsGlob=$QUEUE_DIR/*.ctl
+MakeDirectory=no
+
+[Install]
+WantedBy=paths.target
+EOF
+  cat >/etc/systemd/system/ubusec-ctl.service <<EOF
+[Unit]
+Description=ubusec Einstellungen aus der Weboberfläche übernehmen
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=$INSTALL_PATH --from-ctl
+TimeoutStartSec=45min
+EOF
+}
+
+web_user_cmd() { # web_user_cmd add|del NAME [--totp]
+  [ -f "$WEB_DIR/ubusec_web.py" ] || die "Weboberfläche nicht installiert (ubusec --install --with-web)."
+  ensure_dirs
+  UBUSEC_STATE=$STATE_DIR python3 "$WEB_DIR/ubusec_web.py" "user$1" "${@:2}" || exit 1
+  chown "$WEB_GROUP:$WEB_GROUP" "$STATE_DIR/web/users"; chmod 600 "$STATE_DIR/web/users"
+}
+
+do_install_web() {
+  echo "→ Richte Weboberfläche ein …"
+  apt-get install -y -qq python3-flask python3-waitress qrencode || echo "  Warnung: python3-flask/python3-waitress/qrencode nicht installierbar"
+  getent group "$WEB_GROUP" >/dev/null || groupadd --system "$WEB_GROUP"
+  id "$WEB_GROUP" >/dev/null 2>&1 || useradd --system --gid "$WEB_GROUP" --no-create-home \
+    --home-dir /nonexistent --shell /usr/sbin/nologin "$WEB_GROUP"
+  local src=$SRC_DIR/web
+  if [ -f "$src/ubusec_web.py" ] && [ "$(readlink -f "$src")" != "$WEB_DIR" ]; then
+    rm -rf "$WEB_DIR"; install -d -m 0755 "$WEB_DIR"
+    cp -r "$src/." "$WEB_DIR/"
+    chown -R root:root "$WEB_DIR"; find "$WEB_DIR" -type d -exec chmod 755 {} +; find "$WEB_DIR" -type f -exec chmod 644 {} +
+  fi
+  [ -f "$WEB_DIR/ubusec_web.py" ] || die "Web-Dateien fehlen (Ordner 'web' neben dem Skript)."
+  echo "$UBUSEC_VERSION" >"$WEB_DIR/VERSION"; chmod 644 "$WEB_DIR/VERSION"
+  ensure_dirs
+  if [ ! -f "$CONF_DIR/web.conf" ]; then
+    cat >"$CONF_DIR/web.conf" <<'EOF'
+# ubusec Weboberfläche
+BIND=127.0.0.1           # nur lokal – Zugriff per SSH-Tunnel oder Reverse-Proxy (empfohlen)
+PORT=8765
+SECURE_COOKIES=0         # auf 1 setzen, sobald der Zugriff über HTTPS (Reverse-Proxy) läuft
+TRUST_PROXY=0            # 1, wenn ein Reverse-Proxy auf demselben Server davor sitzt
+SESSION_MINUTES=30       # automatische Abmeldung nach Inaktivität
+EOF
+  fi
+  [ -f "$CONF_DIR/web-secret" ] || head -c 48 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$CONF_DIR/web-secret"
+  # Benutzerdatei liegt seit 1.2 im Datenordner der Weboberfläche (dort darf sie Passwörter ändern)
+  if [ -s "$CONF_DIR/web-users" ] && [ ! -s "$STATE_DIR/web/users" ]; then mv "$CONF_DIR/web-users" "$STATE_DIR/web/users"; fi
+  rm -f "$CONF_DIR/web-users"
+  touch "$STATE_DIR/web/users"; chown "$WEB_GROUP:$WEB_GROUP" "$STATE_DIR/web/users"; chmod 600 "$STATE_DIR/web/users"
+  chown root:"$WEB_GROUP" "$CONF_DIR/web.conf" "$CONF_DIR/web-secret"
+  chmod 640 "$CONF_DIR/web.conf" "$CONF_DIR/web-secret"
+  write_settings_json
+  chgrp -R "$WEB_GROUP" "$LOG_DIR" 2>/dev/null; find "$LOG_DIR" -type d -exec chmod 750 {} + ; find "$LOG_DIR" -type f -exec chmod g+r {} +
+  write_web_units
+  systemctl daemon-reload
+  systemctl enable --now ubusec-queue.path ubusec-ctl.path ubusec-web.service
+  systemctl restart ubusec-web.service 2>/dev/null
+  # eigener Benutzer und Dienst sollen nicht als „neu seit Baseline“ erscheinen
+  [ -f "$BASE_DIR/.created" ] && { snap_users >"$BASE_DIR/users"; snap_units >"$BASE_DIR/units"; }
+  if [ ! -s "$STATE_DIR/web/users" ]; then
+    if [ -t 0 ]; then
+      local name; read -r -p "  Benutzername für die Weboberfläche [admin]: " name; name=${name:-admin}
+      web_user_cmd add "$name" --totp
+    else
+      echo "  Noch kein Web-Benutzer: sudo ubusec --web-user NAME --totp"
+    fi
+  fi
+}
+
+usage() {
+  cat <<EOF
+ubusec $UBUSEC_VERSION – Sicherheits-Scanner für Ubuntu-Server
+
+Aufruf: sudo ubusec [Option]
+
+Scans
+  --quick            Schnellscan: $QUICK_MODULES   (Standard)
+  --full             Vollscan: alle Module, ClamAV über das ganze System, Webshell-Suche
+  --only m1,m2       nur bestimmte Module  (Module: ${ALL_MODULES// /, })
+  --skip m1,m2       Module auslassen
+  --no-color         ohne Farben     --quiet   nur Bericht schreiben, keine Ausgabe
+  --no-notify        keine E-Mail/ntfy-Benachrichtigung
+
+Verwaltung
+  --install [--with-aide]   Pakete installieren, Timer einrichten, Baseline anlegen
+  --init-baseline           Baseline (neu) anlegen
+  --accept                  aktuellen Zustand als neue Baseline übernehmen (nach Prüfung)
+  --last                    letzten Bericht anzeigen
+  --uninstall               Timer, Weboberfläche und Programm entfernen
+
+Werkzeuge und Updates
+  --check-tools             Aktualität der Prüfwerkzeuge und von ubusec prüfen
+  --update-tools            Updates für die Prüfwerkzeuge einspielen, Signaturen erneuern
+  --lynis-upstream          aktuelle Lynis-Version aus der Paketquelle des Herstellers einrichten
+  --update [--yes]          ubusec von GitHub ($UBUSEC_REPO) aktualisieren (mit Prüfsummen-Kontrolle)
+
+Weboberfläche
+  --install --with-web      zusätzlich Weboberfläche einrichten (127.0.0.1:8765)
+  --web-user NAME [--totp]  Web-Benutzer anlegen bzw. Passwort ändern (--totp: 2-Faktor)
+  --web-user-del NAME       Web-Benutzer löschen
+  --version | --help
+
+Exit-Code: 0 ok/Info · 1 Niedrig/Mittel · 2 Hoch · 3 Kritisch
+EOF
+}
+
+# ============================================================================
+#  Hauptprogramm
+# ============================================================================
+main() {
+  local assume_yes=0 only="" skip="" action=scan with_aide=0 with_web=0 web_name="" web_totp=0
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --quick) MODE=quick ;; --full) MODE=full ;;
+      --only) only=${2:-}; shift ;; --skip) skip=${2:-}; shift ;;
+      --no-color) COLOR=-1 ;; --quiet|-q) QUIET=1 ;; --no-notify) NOTIFY=0 ;;
+      --install) action=install ;; --with-aide) with_aide=1 ;; --with-web) with_web=1 ;;
+      --trigger) TRIGGER=${2:-manual}; [[ $TRIGGER =~ ^(manual|timer|web)$ ]] || die "Ungültiger Trigger"; shift ;;
+      --from-queue) action=queue ;;
+      --from-ctl) action=ctl ;;
+      --check-tools) action=checktools ;;
+      --update-tools) action=updatetools ;;
+      --lynis-upstream) action=lynisupstream ;;
+      --update) action=selfupdate ;;
+      --yes|-y) assume_yes=1 ;;
+      --web-user) action=webuser; web_name=${2:-}; shift ;;
+      --web-user-del) action=webuserdel; web_name=${2:-}; shift ;;
+      --totp) web_totp=1 ;;
+      --init-baseline) action=baseline ;; --accept) action=accept ;;
+      --last) action=last ;; --uninstall) action=uninstall ;;
+      --version|-V) echo "ubusec $UBUSEC_VERSION"; exit 0 ;;
+      --help|-h) usage; exit 0 ;;
+      *) usage >&2; die "Unbekannte Option: $1" ;;
+    esac; shift
+  done
+  if [ "$action" = last ]; then
+    local l; l=$(ls -1t "$LOG_DIR"/report-*.txt 2>/dev/null | head -1)
+    [ -n "$l" ] && { cat "$l"; exit 0; } || die "Noch kein Bericht vorhanden."
+  fi
+  [ "$(id -u)" = 0 ] || die "Bitte mit sudo bzw. als root ausführen."
+  . /etc/os-release
+  OS_CODENAME=${VERSION_CODENAME:-unknown}; OS_VERSION=${VERSION_ID:-?}
+  [ "${ID:-}" = ubuntu ] || echo "Warnung: kein Ubuntu erkannt (${ID:-?}) – einige Prüfungen passen evtl. nicht." >&2
+
+  case $action in
+    install) do_install "$with_aide"; [ "$with_web" = 1 ] && do_install_web
+             [ "$with_web" = 1 ] && echo "  Weboberfläche:       http://127.0.0.1:8765  (siehe README: SSH-Tunnel/Reverse-Proxy)"
+             exit 0 ;;
+    queue) process_queue req; exit 0 ;;
+    ctl) process_queue ctl; exit 0 ;;
+    checktools) check_tools; exit 0 ;;
+    updatetools) update_tools; cat "$STATE_DIR/tools-update.log"; exit 0 ;;
+    lynisupstream) lynis_upstream; rc=$?; cat "$STATE_DIR/tools-update.log"; exit $rc ;;
+    selfupdate) self_update "$assume_yes"; exit $? ;;
+    webuser) [[ $web_name =~ ^[A-Za-z0-9._-]{1,32}$ ]] || die "Benutzername: 1–32 Zeichen a-z A-Z 0-9 . _ -"
+             if [ "$web_totp" = 1 ]; then web_user_cmd add "$web_name" --totp; else web_user_cmd add "$web_name"; fi; exit 0 ;;
+    webuserdel) web_user_cmd del "$web_name"; exit 0 ;;
+    baseline) do_baseline "$with_aide"; exit 0 ;;
+    uninstall) do_uninstall; exit 0 ;;
+    accept) do_baseline 0
+            [ -f /var/lib/aide/aide.db.new ] && have aide && aide --config=/etc/aide/aide.conf --update >/dev/null 2>&1 \
+              && cp /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+            exit 0 ;;
+  esac
+
+  if [ "$COLOR" = 0 ] && [ -t 1 ]; then COLOR=1; fi
+  [ "$COLOR" = -1 ] && COLOR=0
+
+  ensure_dirs
+  exec 9>/run/ubusec.lock
+  if ! flock -n 9; then
+    if [ -t 0 ]; then die "Es läuft bereits ein Scan."; fi
+    flock -w 10800 9 || die "Lock-Timeout."
+  fi
+
+  T0=$(date +%s); TS=$(date -d "@$T0" +%Y%m%d-%H%M%S)
+  RAW=$LOG_DIR/raw/$TS; mkdir -p "$RAW"
+  FINDINGS=$RAW/findings.tsv; : >"$FINDINGS"
+  REPORT_TXT=$LOG_DIR/report-$TS-$MODE.txt; REPORT_HTML=$LOG_DIR/report-$TS-$MODE.html
+  REPORT_JSON=$LOG_DIR/report-$TS-$MODE.json
+  load_ignores; load_prev
+  write_settings_json
+  trap 'write_status false "" 0 0 99 ""' EXIT
+  trap on_abort INT TERM HUP
+
+  local m
+  RUN_MODULES=$QUICK_MODULES; MODE_LABEL="Schnellscan"
+  [ "$MODE" = full ] && { RUN_MODULES=$ALL_MODULES; MODE_LABEL="Vollscan"; }
+  if [ -n "$only" ]; then
+    RUN_MODULES=""
+    for m in ${only//,/ }; do [[ " $ALL_MODULES " == *" $m "* ]] || die "Unbekanntes Modul: $m"; RUN_MODULES+="$m "; done
+    MODE_LABEL+=" (nur: ${only//,/, })"
+  fi
+  if [ -n "$skip" ]; then
+    for m in ${skip//,/ }; do RUN_MODULES=$(sed "s/\b$m\b//" <<<"$RUN_MODULES"); done
+  fi
+  # perms vor baseline, damit die SUID-Liste wiederverwendet wird
+  RUN_MODULES=$(for m in $ALL_MODULES; do [[ " $RUN_MODULES " == *" $m "* ]] && printf '%s ' "$m"; done)
+
+  declare -gA MOD_TIME=()
+  local t i=0 total; total=$(wc -w <<<"$RUN_MODULES")
+  for m in $RUN_MODULES; do
+    i=$((i+1)); t=$(date +%s)
+    log "[$i/$total] ${MOD_TITLE[$m]} …"
+    MOD_I=$i; MOD_N=$total; SUB_DONE=0; SUB_TOTAL=0; SUB_TEXT=""; SUB_START=0
+    write_status true "$m" "$i" "$total"
+    "mod_$m"
+    MOD_TIME[$m]=$(( $(date +%s) - t ))
+  done
+
+  SORTED=$RAW/findings.sorted.tsv
+  sort -t$'\t' -k1,1nr -s "$FINDINGS" >"$SORTED"
+  local maxr; maxr=$(cut -f1 "$SORTED" | sort -nr | head -1); maxr=${maxr:-0}
+  SUMMARY=$(awk -F'\t' '$2!="INFO"{c[$2]++} END{s=""; split("KRITISCH HOCH MITTEL NIEDRIG",o," ");
+             for(i=1;i<=4;i++) if(c[o[i]]) s=s (s?", ":"") o[i]" "c[o[i]]; print (s?s:"keine Auffälligkeiten")}' "$SORTED")
+
+  local keep=$COLOR; COLOR=0
+  render_text 0 >"$REPORT_TXT"
+  render_html >"$REPORT_HTML"
+  write_json
+  COLOR=$keep
+  ln -sf "$REPORT_TXT" "$LOG_DIR/latest.txt"; ln -sf "$REPORT_HTML" "$LOG_DIR/latest.html"
+  [ "$QUIET" = 1 ] || render_text 4
+
+  notify
+  cp "$SORTED" "$STATE_DIR/last-findings.$MODE.tsv"
+  local g; g=$(grp)
+  chgrp -R "$g" "$RAW" "$REPORT_TXT" "$REPORT_HTML" "$REPORT_JSON" 2>/dev/null
+  chmod -R g+rX,o-rwx "$RAW" 2>/dev/null
+  local ec=0; case $maxr in 4) ec=3 ;; 3) ec=2 ;; 2|1) ec=1 ;; esac
+  write_status false "" 0 0 "$ec" "$(basename "$REPORT_JSON")"
+  find "$LOG_DIR" -maxdepth 1 -name 'report-*' -mtime +"$KEEP_DAYS" -delete 2>/dev/null
+  trap - EXIT
+  find "$LOG_DIR/raw" -mindepth 1 -maxdepth 1 -type d -mtime +"$KEEP_DAYS" -exec rm -rf {} + 2>/dev/null
+
+  case $maxr in 4) exit 3 ;; 3) exit 2 ;; 2|1) exit 1 ;; *) exit 0 ;; esac
+}
+
+main "$@"
