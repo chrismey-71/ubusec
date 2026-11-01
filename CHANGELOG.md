@@ -2,6 +2,12 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.4.2 – 2026-11-01
+
+- Behoben: „Als Fehlalarm ausblenden“ und „Baseline übernehmen“ in der Weboberfläche wurden abgelehnt
+  („Aktion … in der Scan-Warteschlange“). Ausgeblendete Meldungen verschwinden jetzt sofort aus Übersicht
+  und Empfehlungen, nicht erst nach dem nächsten Scan.
+
 ## 1.4.1 – 2026-11-01
 
 - **Virenscan über den ClamAV-Dienst:** Läuft `clamav-daemon` ohnehin (Virtualmin-Mailfilter, Nextcloud
@@ -26,9 +32,6 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   Nextcloud-App-Ordner zum Ordnernamen passt und die Prozesse nicht als root laufen.
 - Treffer in den Testdateien des Pakets clamav-testfiles (/usr/share/clamav-testfiles, Signatur
   „Clamav.Test.File“) werden als harmlos erkannt, sofern die Paketdateien unverändert sind.
-- Behoben: „Als Fehlalarm ausblenden“ und „Baseline übernehmen“ in der Weboberfläche wurden abgelehnt
-  („Aktion … in der Scan-Warteschlange“). Ausgeblendete Meldungen verschwinden jetzt sofort aus Übersicht
-  und Empfehlungen, nicht erst nach dem nächsten Scan.
 - Abbruchgrund in der Weboberfläche: Zeitpunkt, Bereich, Fortschritt und Ursache (Benutzer, systemctl stop,
   Strg+C, Zeitlimit, Neustart, Speichermangel, Programmfehler).
 
