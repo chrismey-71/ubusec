@@ -126,8 +126,19 @@ _H = [
         steps=["Größte Verbraucher ansehen: ps -eo comm,rss --sort=-rss | head",
                "Häufige Ursachen: zu viele PHP-FPM-Prozesse (pm.max_children), großer MySQL-Puffer (innodb_buffer_pool_size), "
                "Nextcloud-Hintergrundjobs.",
-               "Virenscan entlasten: Einstellungen → Scan-Einstellungen → weniger parallele Prozesse",
+               "Virenscan entlasten: Läuft der ClamAV-Dienst (clamav-daemon), prüft ubusec automatisch über ihn; sonst "
+               "Einstellungen → Scan-Einstellungen → weniger parallele Prüfungen.",
                "Dauerhaft knapp: Arbeitsspeicher beim Provider aufstocken."], effort="prüfen")),
+    (r"^malware\|ClamAV-Dienst während des Virenscans nicht erreichbar", dict(
+        why="ubusec prüft über den laufenden ClamAV-Dienst. Er hat während des Scans nicht mehr geantwortet – die "
+            "restlichen Dateien wurden mit clamscan geprüft, der Scan ist also vollständig. Fällt der Dienst aus, "
+            "prüfen aber auch Mailfilter und Nextcloud „Antivirus for files“ nichts mehr.",
+        steps=["$ systemctl status clamav-daemon --no-pager",
+               "$ journalctl -u clamav-daemon -n 50 --no-pager",
+               "Häufige Ursache: der Dienst wurde wegen Speichermangel beendet (im Journal „oom-kill“) oder beim "
+               "Signatur-Update neu gestartet.",
+               "Dauerhaft ohne Dienst prüfen: Einstellungen → Scan-Einstellungen → Virenscanner „Immer eigene clamscan-Prozesse“"],
+        effort="10 Min")),
     (r"^config\|Swap wird früh genutzt", dict(
         why="Mit dem Standardwert lagert Linux schon früh Daten in den Swap aus. Auf Servern mit Datenbanken soll der Swap "
             "nur ein Notpolster sein.",

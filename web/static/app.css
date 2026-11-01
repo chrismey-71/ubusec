@@ -372,3 +372,5 @@ pre.notes { white-space: pre-wrap; font-family: var(--sans); font-size: .95rem; 
   .shell { display: block; }
   details.finding { break-inside: avoid; }
 }
+.field-warn { margin: .4rem 0 0; padding: .5rem .75rem; border-left: 4px solid var(--mittel); background: var(--mittel-bg); border-radius: 4px; font-size: .9rem; }
+.field-warn[hidden] { display: none; }

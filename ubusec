@@ -51,7 +51,8 @@ SITES_TESTSSL=0
 WPSCAN_API_TOKEN=""
 UBUSEC_REPO="chrismey-71/ubusec"   # GitHub-Repository für den Versionshinweis
 UPDATE_CHECK=1               # bei GitHub nach neuen ubusec-Versionen fragen
-CLAM_PARALLEL=0              # 0 = automatisch, sonst Anzahl paralleler clamscan-Prozesse
+CLAM_PARALLEL=0              # 0 = automatisch, sonst Anzahl paralleler Prüfungen
+CLAM_ENGINE=auto             # auto = laufenden ClamAV-Dienst (clamd) mitbenutzen; clamscan = immer eigene Prozesse
 CLAM_EXCLUDE_DB=1            # Datenbankdateien (MySQL/MariaDB, PostgreSQL …)
 CLAM_EXCLUDE_BACKUPS=1       # Backup-Ordner (/backup, ~/backups …)
 CLAM_EXCLUDE_LOGS=1          # Protokolle (/var/log, ~/logs)
@@ -167,7 +168,7 @@ on_abort() { # on_abort SIGNAL
   elif systemctl is-system-running 2>/dev/null | grep -q stopping; then ABORT_REASON="Server wurde heruntergefahren oder neu gestartet"
   elif (( el >= limit - 120 )); then ABORT_REASON="Zeitlimit überschritten ($(( limit / 3600 )) Stunden)"
   else ABORT_REASON="Von außen beendet (z. B. systemctl stop)"; fi
-  [ "$CUR_MOD" = malware ] && [ -n "${RAW:-}" ] && SUB_DONE=$(cat "$RAW"/clam.out.* 2>/dev/null | wc -l)
+  [ "$CUR_MOD" = malware ] && [ -n "${RAW:-}" ] && SUB_DONE=$(clam_count)
   write_status false "$CUR_MOD" "$MOD_I" "$MOD_N" 130 ""
   [ -n "${LOG_DIR:-}" ] && printf '%s Scan abgebrochen (%s, PID %s): %s\n' "$(date '+%F %T')" "${MODE_LABEL:-$MODE}" "$$" "$ABORT_REASON" >>"$LOG_DIR/web-audit.log"
   log "ubusec: Scan abgebrochen – $ABORT_REASON"
@@ -770,32 +771,95 @@ clam_excludes() {
   return 0
 }
 
-# Anzahl paralleler clamscan-Prozesse (je ca. 1,5 GB Arbeitsspeicher)
+# Speichergrenze der Scan-Dienste in MB: 40 % des Arbeitsspeichers, aber mindestens 2,5 GB
+# (damit ein clamscan-Prozess sicher hineinpasst) und höchstens 75 %
+scan_mem_limit_mb() {
+  local tot lim
+  tot=$(awk '/^MemTotal:/{print int($2/1024)}' /proc/meminfo); tot=${tot:-4096}
+  lim=$(( tot * 40 / 100 )); (( lim < 2560 )) && lim=2560
+  (( lim > tot * 75 / 100 )) && lim=$(( tot * 75 / 100 ))
+  echo "$lim"
+}
+CLAM_PROC_MB=1400   # Bedarf eines clamscan-Prozesses (fast nur die Virensignaturen), mit Reserve
+# Wie viele clamscan-Prozesse in die Speichergrenze passen
+clam_fit() { local n=$(( ($(scan_mem_limit_mb) - 512) / CLAM_PROC_MB )); (( n < 1 )) && n=1; echo "$n"; }
+
+# Automatische Anzahl eigener clamscan-Prozesse: so viele, wie in die Speichergrenze passen
+# und gerade frei ist (2 GB Reserve für Webserver und Datenbank), höchstens Kerne − 1
 clam_auto_workers() {
-  # je Prozess ca. 1,6 GB; höchstens so viel, wie frei ist (minus 2 GB Reserve) und wie die
-  # Speichergrenze der Scan-Dienste (40 % des Arbeitsspeichers) zulässt
-  local cpus tot avail budget cap n
+  local cpus avail budget cap n
   cpus=$(nproc 2>/dev/null || echo 1)
-  read -r tot avail < <(awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print int(t/1024), int(a/1024)}' /proc/meminfo)
-  budget=$(( ${avail:-2048} - 2048 )); cap=$(( ${tot:-2048} * 40 / 100 - 1024 ))
+  avail=$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo)
+  budget=$(( ${avail:-2048} - 2048 )); cap=$(( $(scan_mem_limit_mb) - 512 ))
   (( budget > cap )) && budget=$cap
-  n=$(( budget / 1600 ))
+  n=$(( budget / CLAM_PROC_MB ))
   (( n > cpus - 1 )) && n=$(( cpus - 1 ))
   (( n > 6 )) && n=6
   (( n < 1 )) && n=1
   echo "$n"
 }
-clam_workers() { if [ "${CLAM_PARALLEL:-0}" -gt 0 ] 2>/dev/null; then echo "$CLAM_PARALLEL"; else clam_auto_workers; fi; }
+
+# ClamAV-Dienst (clamd): Läuft er ohnehin (Virtualmin-Mailfilter, Nextcloud „Antivirus for files“),
+# prüft ubusec über ihn – die Signaturen liegen dann nur einmal im Speicher.
+clamd_conf() { local k=$1 f=/etc/clamav/clamd.conf; [ -r "$f" ] && awk -v k="$k" '$1==k{print $2; exit}' "$f"; }
+clamd_running() { systemctl is-active -q clamav-daemon 2>/dev/null || pgrep -x clamd >/dev/null 2>&1; }
+clamd_usable() { # prüft wirklich eine Datei über den Dienst (Verbindung und Dateiübergabe)
+  have clamdscan && clamd_running || return 1
+  local out
+  out=$(timeout 60 clamdscan --fdpass --no-summary /etc/os-release 2>&1) || return 1
+  [[ $out == *": OK"* ]]
+}
+clam_engine() { if [ "${CLAM_ENGINE:-auto}" = auto ] && clamd_usable; then echo clamd; else echo clamscan; fi; }
+# Parallele Prüfungen über den Dienst: halb so viele wie Kerne (höchstens 4), damit der Dienst
+# genug Threads für eingehende Mails und Nextcloud-Uploads behält
+clamd_auto_workers() {
+  local cpus n mt
+  cpus=$(nproc 2>/dev/null || echo 1); n=$(( cpus / 2 ))
+  mt=$(clamd_conf MaxThreads); mt=${mt:-10}
+  (( n > mt - 2 )) && n=$(( mt - 2 ))
+  (( n > 4 )) && n=4
+  (( n < 1 )) && n=1
+  echo "$n"
+}
+clam_workers() { # clam_workers ENGINE
+  if [ "${CLAM_PARALLEL:-0}" -gt 0 ] 2>/dev/null; then echo "$CLAM_PARALLEL"
+  elif [ "$1" = clamd ]; then clamd_auto_workers; else clam_auto_workers; fi
+}
+
+CLAM_GONE_RX='No such file|lstat\(\) failed|File path check failure'
+# Erledigte Dateien: Ausgabezeilen der Scanner bzw. fertige Teillisten beim ClamAV-Dienst
+clam_count() {
+  local a b
+  a=$(cat "$RAW"/clam.out.* 2>/dev/null | wc -l)
+  b=$(cat "$RAW"/clam.done.* 2>/dev/null | awk '{s+=$1} END{print s+0}')
+  (( b > a )) && a=$b
+  (( SUB_TOTAL > 0 && a > SUB_TOTAL )) && a=$SUB_TOTAL
+  echo "$a"
+}
 
 # Fortschritt für die Weboberfläche: erledigte Dateien zählen, aktuellen Ordner zeigen
 clam_progress() {
   local out
   while sleep 8; do
-    SUB_DONE=$(cat "$RAW"/clam.out.* 2>/dev/null | wc -l)
+    SUB_DONE=$(clam_count)
     out=$(ls -t "$RAW"/clam.out.* 2>/dev/null | head -1)
     SUB_TEXT=$(tail -n1 "$out" 2>/dev/null | sed -E 's/: [^:]*$//'); SUB_TEXT=${SUB_TEXT%/*}
     write_status true malware "$MOD_I" "$MOD_N"
   done
+}
+
+# Ein Prüfstrang über den ClamAV-Dienst: arbeitet seine Teillisten nacheinander ab.
+# Rückgabe 3, wenn der Dienst nicht mehr antwortet (der Rest wird dann mit clamscan nachgeholt).
+clamd_worker() { # clamd_worker ID TEILLISTE…
+  local id=$1 p r cp=""; shift
+  trap '[ -n "$cp" ] && kill "$cp" 2>/dev/null; exit 143' TERM
+  for p in "$@"; do
+    nice -n 19 ionice -c3 clamdscan --fdpass --no-summary -f "$p" >>"$RAW/clam.out.$id" 2>>"$RAW/clam.err.$id" &
+    cp=$!; r=0; wait "$cp" || r=$?; cp=""
+    if (( r >= 2 )) && ! clamd_usable; then return 3; fi
+    wc -l <"$p" >>"$RAW/clam.done.$id"
+  done
+  return 0
 }
 
 mod_malware() {
@@ -820,38 +884,59 @@ mod_malware() {
     | awk '!seen[$0]++' >"$RAW/clam.list"
   local total; total=$(wc -l <"$RAW/clam.list")
 
-  # 2. Auf parallele clamscan-Prozesse verteilen (reihum, damit alle ähnlich viel Arbeit haben)
-  local n; n=$(clam_workers); (( n > total )) && n=$(( total > 0 ? total : 1 ))
-  rm -f "$RAW"/clam.chunk.* "$RAW"/clam.out.* "$RAW"/clam.err.*
-  split -n "r/$n" -d -a 2 "$RAW/clam.list" "$RAW/clam.chunk."
+  # 2. Prüfen: über den laufenden ClamAV-Dienst oder mit eigenen clamscan-Prozessen
+  local engine n; engine=$(clam_engine); n=$(clam_workers "$engine")
+  (( n > total )) && n=$(( total > 0 ? total : 1 ))
+  rm -f "$RAW"/clam.chunk.* "$RAW"/clam.part.* "$RAW"/clam.out.* "$RAW"/clam.err.* "$RAW"/clam.done.*
   SUB_TOTAL=$total; SUB_DONE=0; SUB_TEXT=""; SUB_START=$(date +%s); write_status true malware "$MOD_I" "$MOD_N"
-  log "   ClamAV prüft $total Dateien mit $n Prozess(en) …"
-  local pids=() ids=() c id
-  for c in "$RAW"/clam.chunk.*; do
-    [ -s "$c" ] || continue
-    id=${c##*.}
-    nice -n 19 ionice -c3 clamscan --no-summary --max-filesize="$CLAM_MAX_FILESIZE" --max-scansize=400M \
-      -f "$c" >"$RAW/clam.out.$id" 2>"$RAW/clam.err.$id" &
-    pids+=($!); ids+=("$id")
-  done
+  local pids=() ids=() c id w
+  if [ "$engine" = clamd ]; then
+    # kleine Teillisten (je 500 Dateien), reihum auf die Prüfstränge verteilt
+    log "   ClamAV-Dienst prüft $total Dateien mit $n parallelen Prüfungen …"
+    split -l 500 -d -a 6 "$RAW/clam.list" "$RAW/clam.part."
+    local parts=("$RAW"/clam.part.*) mine k
+    [ -e "${parts[0]}" ] || parts=()
+    for (( w = 0; w < n; w++ )); do
+      id=$(printf '%02d' "$w"); mine=()
+      for (( k = w; k < ${#parts[@]}; k += n )); do mine+=("${parts[$k]}"); done
+      (( ${#mine[@]} > 0 )) || continue
+      printf '%s\n' "${mine[@]}" | xargs cat >"$RAW/clam.chunk.$id"   # für ein mögliches Nachholen
+      clamd_worker "$id" "${mine[@]}" &
+      pids+=($!); ids+=("$id")
+    done
+  else
+    # auf parallele clamscan-Prozesse verteilen (reihum, damit alle ähnlich viel Arbeit haben)
+    log "   ClamAV prüft $total Dateien mit $n Prozess(en) …"
+    split -n "r/$n" -d -a 2 "$RAW/clam.list" "$RAW/clam.chunk."
+    for c in "$RAW"/clam.chunk.*; do
+      [ -s "$c" ] || continue
+      id=${c##*.}
+      nice -n 19 ionice -c3 clamscan --no-summary --max-filesize="$CLAM_MAX_FILESIZE" --max-scansize=400M \
+        -f "$c" >"$RAW/clam.out.$id" 2>"$RAW/clam.err.$id" &
+      pids+=($!); ids+=("$id")
+    done
+  fi
   clam_progress & local prog=$!
 
   # 3. Warten und Ergebnisse auswerten (Abbruch per Signal greift hier sofort)
-  local rc=0 r i killed=() retried=0
+  local rc=0 r i killed=() failed=() retried=0
   for i in "${!pids[@]}"; do
     r=0; wait "${pids[$i]}" || r=$?
-    if (( r > 128 )); then killed+=("${ids[$i]}"); elif (( r > rc )); then rc=$r; fi
+    if (( r > 128 )); then killed+=("${ids[$i]}")
+    elif [ "$engine" = clamd ] && (( r == 3 )); then failed+=("${ids[$i]}")
+    elif [ "$engine" = clamscan ] && (( r > rc )); then rc=$r; fi
   done
-  # Teil-Scans, die das System beendet hat (meist Speichermangel): fehlende Dateien mit
-  # einem einzelnen Prozess nachholen, wenn die anderen fertig sind und Speicher frei ist
-  if (( ${#killed[@]} > 0 )); then
+  # Teil-Scans, die das System beendet hat (meist Speichermangel) oder bei denen der ClamAV-Dienst
+  # ausgefallen ist: fehlende Dateien mit einem einzelnen clamscan-Prozess nachholen
+  if (( ${#killed[@]} + ${#failed[@]} > 0 )); then
     : >"$RAW/clam.retry"
-    for id in "${killed[@]}"; do
+    for id in "${killed[@]}" "${failed[@]}"; do
       awk 'NR==FNR { sub(/: [^:]*$/, ""); done[$0] = 1; next } !($0 in done)' \
         "$RAW/clam.out.$id" "$RAW/clam.chunk.$id" >>"$RAW/clam.retry"
     done
+    rm -f "$RAW"/clam.done.*
     retried=$(wc -l <"$RAW/clam.retry")
-    log "   ${#killed[@]} Teil-Scan(s) vom System beendet – prüfe $retried Dateien einzeln nach …"
+    log "   $(( ${#killed[@]} + ${#failed[@]} )) Teil-Scan(s) nicht fertig geworden – prüfe $retried Dateien mit clamscan nach …"
     SUB_TEXT="Hole $retried Dateien nach …"
     r=0
     nice -n 19 ionice -c3 clamscan --no-summary --max-filesize="$CLAM_MAX_FILESIZE" --max-scansize=400M \
@@ -860,11 +945,33 @@ mod_malware() {
     (( r > rc )) && rc=$r
     rm -f "$RAW/clam.retry"
   fi
+  # Dateien, die der ClamAV-Dienst nicht lesen konnte (z. B. wegen AppArmor), mit clamscan nachholen;
+  # während des Scans gelöschte Dateien zählen nicht
+  local unread=0
+  if [ "$engine" = clamd ]; then
+    cat "$RAW"/clam.out.[0-9]* 2>/dev/null | grep ' ERROR$' | grep -viE "$CLAM_GONE_RX" \
+      | sed -E 's/: [^:]* ERROR$//' >"$RAW/clam.retry2"
+    unread=$(grep -c . "$RAW/clam.retry2")
+    if (( unread > 0 )); then
+      log "   $unread Dateien konnte der ClamAV-Dienst nicht lesen – prüfe sie mit clamscan …"
+      SUB_TEXT="Prüfe $unread Dateien mit clamscan nach …"
+      r=0
+      nice -n 19 ionice -c3 clamscan --no-summary --max-filesize="$CLAM_MAX_FILESIZE" --max-scansize=400M \
+        -f "$RAW/clam.retry2" >"$RAW/clam.out.retry2" 2>"$RAW/clam.err.retry2" &
+      wait $! || r=$?
+      (( r > 128 )) && rc=$r
+    fi
+    rm -f "$RAW/clam.retry2"
+  fi
   kill "$prog" 2>/dev/null; wait "$prog" 2>/dev/null
-  SUB_DONE=$(cat "$RAW"/clam.out.* 2>/dev/null | wc -l); write_status true malware "$MOD_I" "$MOD_N"
-  cat "$RAW"/clam.out.* 2>/dev/null | grep ' FOUND$' | sed 's/ FOUND$//' >"$RAW/clam-hits.txt"
+  SUB_DONE=$(clam_count); write_status true malware "$MOD_I" "$MOD_N"
+  cat "$RAW"/clam.out.* 2>/dev/null | grep ' FOUND$' | sed 's/ FOUND$//' >"$RAW/clam-found.txt"
+  # „Heuristics.Limits.Exceeded“ (nur mit AlertExceedsMax) ist kein Virus, sondern eine zu große Datei
+  grep -v 'Heuristics\.Limits\.Exceeded' "$RAW/clam-found.txt" >"$RAW/clam-hits.txt"
+  grep -c 'Heuristics\.Limits\.Exceeded' "$RAW/clam-found.txt" >"$RAW/clam-limits.txt"
+  cat "$RAW"/clam.out.* 2>/dev/null | grep ' ERROR$' >"$RAW/clam-errors.txt"
   cat "$RAW"/clam.err.* 2>/dev/null | grep -v '^$' >"$RAW/clamscan.err"
-  rm -f "$RAW"/clam.chunk.* "$RAW"/clam.out.* "$RAW"/clam.err.* "$RAW/clam.list"
+  rm -f "$RAW"/clam.chunk.* "$RAW"/clam.part.* "$RAW"/clam.out.* "$RAW"/clam.err.* "$RAW"/clam.done.* "$RAW/clam.list" "$RAW/clam-found.txt"
 
   local hits dur=$(( $(date +%s) - SUB_START ))
   hits=$(grep -c . "$RAW/clam-hits.txt")
@@ -884,14 +991,30 @@ mod_malware() {
       "${#killed[@]} von $n Prozessen vom System beendet, $retried Dateien einzeln nachgeprüft" \
       "Empfehlung: Einstellungen → Scan-Einstellungen → weniger parallele Virenscan-Prozesse"
   fi
+  if (( ${#failed[@]} > 0 )); then
+    add NIEDRIG malware "ClamAV-Dienst während des Virenscans nicht erreichbar – Dateien mit clamscan nachgeholt" \
+      "$retried Dateien mit einem eigenen clamscan-Prozess nachgeprüft" \
+      "Prüfen: systemctl status clamav-daemon; journalctl -u clamav-daemon -n 50"
+  fi
+  local gone; gone=$(grep -ciE "$CLAM_GONE_RX" "$RAW/clam-errors.txt")
+  local lim; lim=$(cat "$RAW/clam-limits.txt" 2>/dev/null); lim=${lim:-0}
   local ex=0
   while IFS= read -r e; do
     [[ $e =~ ^(/proc|/sys|/dev|/run|/snap|/var/lib/(docker|containerd|lxcfs|clamav)|/swapfile|/swap\.img)$ ]] && continue
     [ "$e" = "$LOG_DIR" ] || [ "$e" = "$STATE_DIR" ] || { [ -e "$e" ] && ex=$((ex+1)); }
   done <"$RAW/clam-excludes.txt"
-  add INFO malware "Virenscan: $total Dateien mit $n Prozess(en) in $(fmt_dur "$dur") geprüft" \
-    "Durchsucht: ${roots[*]}" "Ausgenommen: $ex Ordner (Liste: $RAW/clam-excludes.txt)" \
-    "Größere Dateien als $CLAM_MAX_FILESIZE werden übersprungen"
+  local how="mit $n Prozess(en)" size="Größere Dateien als $CLAM_MAX_FILESIZE werden übersprungen"
+  if [ "$engine" = clamd ]; then
+    how="über den ClamAV-Dienst ($n parallele Prüfungen)"
+    local mfs; mfs=$(clamd_conf MaxFileSize)
+    size="Größere Dateien als $CLAM_MAX_FILESIZE werden übersprungen; der ClamAV-Dienst prüft Dateien bis ${mfs:-100M} (MaxFileSize in /etc/clamav/clamd.conf)"
+  fi
+  local extra=()
+  (( unread > 0 )) && extra+=("$unread Dateien konnte der ClamAV-Dienst nicht lesen; sie wurden mit clamscan geprüft (Liste: $RAW/clam-errors.txt)")
+  (( gone > 0 )) && extra+=("$gone Dateien wurden während des Scans gelöscht oder verschoben (normal bei temporären Dateien)")
+  (( lim > 0 )) && extra+=("$lim Dateien überschreiten die Größen- oder Entpackgrenzen des ClamAV-Dienstes und wurden nur teilweise geprüft")
+  add INFO malware "Virenscan: $total Dateien $how in $(fmt_dur "$dur") geprüft" \
+    "Durchsucht: ${roots[*]}" "Ausgenommen: $ex Ordner (Liste: $RAW/clam-excludes.txt)" "$size" "${extra[@]}"
 }
 
 # ============================================================================
@@ -1157,10 +1280,10 @@ ExecStart=$INSTALL_PATH --quick --quiet --trigger timer
 Nice=19
 IOSchedulingClass=idle
 CPUWeight=20
-# Speicherschutz: Scans dürfen höchstens 40 % des Arbeitsspeichers belegen und nie in den
-# Swap ausweichen (der bleibt für Webserver und Datenbank). Wird es eng, trifft es den
-# Scanner, und ein beendeter Teilprozess bricht nicht den ganzen Scan ab.
-MemoryMax=40%
+# Speicherschutz: Scans dürfen höchstens 40 % des Arbeitsspeichers belegen (mindestens 2,5 GB,
+# höchstens 75 %) und nie in den Swap ausweichen (der bleibt für Webserver und Datenbank).
+# Wird es eng, trifft es den Scanner, und ein beendeter Teilprozess bricht nicht den ganzen Scan ab.
+MemoryMax=$(scan_mem_limit_mb)M
 MemorySwapMax=0
 OOMScoreAdjust=500
 OOMPolicy=continue
@@ -1430,7 +1553,7 @@ print(r.get("html_url", ""))') || die "GitHub nicht erreichbar oder noch keine V
 }
 
 # Einstellungen, die die Weboberfläche ändern darf – jeweils mit strenger Prüfung
-SETTING_KEYS="MAIL_TO NTFY_URL NOTIFY_MIN NOTIFY_ONLY_NEW KEEP_DAYS CLAM_PATHS_QUICK CLAM_MAX_FILESIZE WEB_PATHS SITES_EXCLUDE SITES_EXTRA SITES_TESTSSL WPSCAN_API_TOKEN CLAM_PARALLEL CLAM_EXCLUDE_DB CLAM_EXCLUDE_BACKUPS CLAM_EXCLUDE_LOGS CLAM_EXCLUDE_MAIL CLAM_EXCLUDE_NEXTCLOUD CLAM_EXCLUDE_CUSTOM UPDATE_CHECK"
+SETTING_KEYS="MAIL_TO NTFY_URL NOTIFY_MIN NOTIFY_ONLY_NEW KEEP_DAYS CLAM_PATHS_QUICK CLAM_MAX_FILESIZE WEB_PATHS SITES_EXCLUDE SITES_EXTRA SITES_TESTSSL WPSCAN_API_TOKEN CLAM_PARALLEL CLAM_EXCLUDE_DB CLAM_EXCLUDE_BACKUPS CLAM_EXCLUDE_LOGS CLAM_EXCLUDE_MAIL CLAM_EXCLUDE_NEXTCLOUD CLAM_EXCLUDE_CUSTOM UPDATE_CHECK CLAM_ENGINE"
 declare -A SETTING_RX=(
   [MAIL_TO]='^([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}){0,4})?$'
   [NTFY_URL]='^(https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~%-]*){0,6})?$'
@@ -1446,6 +1569,7 @@ declare -A SETTING_RX=(
   [WPSCAN_API_TOKEN]='^[A-Za-z0-9]{0,64}$'
   [UPDATE_CHECK]='^[01]$'
   [CLAM_PARALLEL]='^([0-9]|1[0-6])$'
+  [CLAM_ENGINE]='^(auto|clamscan)$'
   [CLAM_EXCLUDE_DB]='^[01]$' [CLAM_EXCLUDE_BACKUPS]='^[01]$' [CLAM_EXCLUDE_LOGS]='^[01]$'
   [CLAM_EXCLUDE_MAIL]='^[01]$' [CLAM_EXCLUDE_NEXTCLOUD]='^[01]$'
   [CLAM_EXCLUDE_CUSTOM]='^(/[A-Za-z0-9._/-]*( /[A-Za-z0-9._/-]*){0,29})?$'
@@ -1491,7 +1615,11 @@ write_settings_json() {
     export UBUSEC_MAILER=$mailer UBUSEC_KEYS="$SETTING_KEYS QUICK_ON QUICK_DAYS QUICK_TIME FULL_ON FULL_DAYS FULL_TIME"
     export UBUSEC_CPUS="$(nproc 2>/dev/null)" UBUSEC_MEM="$(awk '/^MemTotal:/{print int($2/1048576+0.5)}' /proc/meminfo)"
     export UBUSEC_SWAP="$(awk '/^SwapTotal:/{printf "%.1f", $2/1048576}' /proc/meminfo | sed 's/\.0$//; s/\./,/')"
-    export UBUSEC_AUTO="$(clam_auto_workers)" UBUSEC_NCDIRS="$(nextcloud_datadirs | tr '\n' ' ')" UBUSEC_BACKUPDIRS="$(backup_dirs | tr '\n' ' ')"
+    local eng=clamscan usable=0; clamd_usable && usable=1
+    [ "${CLAM_ENGINE:-auto}" = auto ] && [ $usable = 1 ] && eng=clamd
+    export UBUSEC_ENGINE=$eng UBUSEC_CLAMD_OK=$usable UBUSEC_CLAMD="$(clamd_running && echo 1 || echo 0)" UBUSEC_CLAMDSCAN="$(have clamdscan && echo 1 || echo 0)"
+    export UBUSEC_LIMIT="$(scan_mem_limit_mb)" UBUSEC_FIT="$(clam_fit)" UBUSEC_AUTO_CLAMSCAN="$(clam_auto_workers)"
+    export UBUSEC_AUTO="$( [ "$eng" = clamd ] && clamd_auto_workers || clam_auto_workers )" UBUSEC_AUTO_CLAMD="$(clamd_auto_workers)" UBUSEC_NCDIRS="$(nextcloud_datadirs | tr '\n' ' ')" UBUSEC_BACKUPDIRS="$(backup_dirs | tr '\n' ' ')"
     python3 -I -c 'import json, os, time
 d = {k: os.environ.get(k, "") for k in os.environ["UBUSEC_KEYS"].split()}
 d["WPSCAN_API_TOKEN"] = "gesetzt" if d["WPSCAN_API_TOKEN"] else ""
@@ -1501,6 +1629,15 @@ d["_cpus"] = os.environ.get("UBUSEC_CPUS", "")
 d["_mem_gb"] = os.environ.get("UBUSEC_MEM", "")
 d["_swap_gb"] = os.environ.get("UBUSEC_SWAP", "")
 d["_auto_parallel"] = os.environ.get("UBUSEC_AUTO", "1")
+d["_auto_clamscan"] = os.environ.get("UBUSEC_AUTO_CLAMSCAN", "1")
+d["_auto_clamd"] = os.environ.get("UBUSEC_AUTO_CLAMD", "1")
+d["_engine"] = os.environ.get("UBUSEC_ENGINE", "clamscan")
+d["_clamd_running"] = os.environ.get("UBUSEC_CLAMD") == "1"
+d["_clamd_usable"] = os.environ.get("UBUSEC_CLAMD_OK") == "1"
+d["_clamdscan"] = os.environ.get("UBUSEC_CLAMDSCAN") == "1"
+lim = int(os.environ.get("UBUSEC_LIMIT", "0") or 0)
+d["_mem_limit_gb"] = ("%.1f" % (lim / 1024)).replace(".", ",")
+d["_clam_fit"] = int(os.environ.get("UBUSEC_FIT", "1") or 1)
 d["_nc_datadirs"] = os.environ.get("UBUSEC_NCDIRS", "").split()
 d["_backup_dirs"] = os.environ.get("UBUSEC_BACKUPDIRS", "").split()
 print(json.dumps(d, ensure_ascii=False))'
@@ -1688,10 +1825,10 @@ ExecStart=$INSTALL_PATH --from-queue
 Nice=19
 IOSchedulingClass=idle
 CPUWeight=20
-# Speicherschutz: Scans dürfen höchstens 40 % des Arbeitsspeichers belegen und nie in den
-# Swap ausweichen (der bleibt für Webserver und Datenbank). Wird es eng, trifft es den
-# Scanner, und ein beendeter Teilprozess bricht nicht den ganzen Scan ab.
-MemoryMax=40%
+# Speicherschutz: Scans dürfen höchstens 40 % des Arbeitsspeichers belegen (mindestens 2,5 GB,
+# höchstens 75 %) und nie in den Swap ausweichen (der bleibt für Webserver und Datenbank).
+# Wird es eng, trifft es den Scanner, und ein beendeter Teilprozess bricht nicht den ganzen Scan ab.
+MemoryMax=$(scan_mem_limit_mb)M
 MemorySwapMax=0
 OOMScoreAdjust=500
 OOMPolicy=continue

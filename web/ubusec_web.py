@@ -55,6 +55,7 @@ SETTING_RX = {
     "SITES_TESTSSL": r"[01]",
     "WPSCAN_API_TOKEN": r"[A-Za-z0-9]{0,64}",
     "CLAM_PARALLEL": r"([0-9]|1[0-6])",
+    "CLAM_ENGINE": r"auto|clamscan",
     "UPDATE_CHECK": r"[01]",
     "CLAM_EXCLUDE_DB": r"[01]", "CLAM_EXCLUDE_BACKUPS": r"[01]", "CLAM_EXCLUDE_LOGS": r"[01]",
     "CLAM_EXCLUDE_MAIL": r"[01]", "CLAM_EXCLUDE_NEXTCLOUD": r"[01]",
@@ -67,7 +68,7 @@ SETTING_LABEL = {
     "MAIL_TO": "E-Mail-Adresse", "NTFY_URL": "ntfy-Adresse", "KEEP_DAYS": "Aufbewahrung",
     "CLAM_PATHS_QUICK": "Ordner für den Virenscan", "WEB_PATHS": "Webverzeichnisse",
     "SITES_EXCLUDE": "Ausgeschlossene Domains", "SITES_EXTRA": "Zusätzliche Domains", "WPSCAN_API_TOKEN": "WPScan-Token",
-    "CLAM_PARALLEL": "Parallele Prozesse", "CLAM_EXCLUDE_CUSTOM": "Weitere ausgenommene Ordner",
+    "CLAM_PARALLEL": "Parallele Prüfungen", "CLAM_ENGINE": "Virenscanner", "CLAM_EXCLUDE_CUSTOM": "Weitere ausgenommene Ordner",
 }
 
 MODULES = [
@@ -970,7 +971,7 @@ def create_app():
     @app.route("/einstellungen/scan", methods=["POST"])
     def save_scan():
         keys = ["KEEP_DAYS", "CLAM_PATHS_QUICK", "CLAM_MAX_FILESIZE", "WEB_PATHS", "SITES_EXCLUDE", "SITES_EXTRA", "SITES_TESTSSL",
-                "CLAM_PARALLEL", "CLAM_EXCLUDE_DB", "CLAM_EXCLUDE_BACKUPS", "CLAM_EXCLUDE_LOGS", "CLAM_EXCLUDE_MAIL",
+                "CLAM_ENGINE", "CLAM_PARALLEL", "CLAM_EXCLUDE_DB", "CLAM_EXCLUDE_BACKUPS", "CLAM_EXCLUDE_LOGS", "CLAM_EXCLUDE_MAIL",
                 "CLAM_EXCLUDE_NEXTCLOUD", "CLAM_EXCLUDE_CUSTOM", "UPDATE_CHECK"]
         tok = request.form.get("WPSCAN_API_TOKEN", "").strip()
         if tok or request.form.get("token_remove"):

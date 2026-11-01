@@ -166,14 +166,34 @@
       <select name="CLAM_MAX_FILESIZE">
         {% for v in ['25M', '50M', '100M', '200M', '400M'] %}<option value="{{ v }}" {% if conf.get('CLAM_MAX_FILESIZE', '100M') == v %}selected{% endif %}>{{ v[:-1] }} MB</option>{% endfor %}
       </select></label>
-    <label>Parallele Virenscan-Prozesse
-      <select name="CLAM_PARALLEL">
+    {% set eng = conf.get('CLAM_ENGINE', 'auto') or 'auto' %}
+    {% set via_clamd = eng == 'auto' and conf._engine == 'clamd' %}
+    <label>Virenscanner
+      <select name="CLAM_ENGINE">
+        <option value="auto" {% if eng == 'auto' %}selected{% endif %}>Automatisch – laufenden ClamAV-Dienst mitbenutzen</option>
+        <option value="clamscan" {% if eng == 'clamscan' %}selected{% endif %}>Immer eigene clamscan-Prozesse</option>
+      </select>
+      <small class="muted">
+        {% if conf._clamd_usable %}Der ClamAV-Dienst (clamd) läuft und ist erreichbar.
+          {% if eng == 'auto' %}Der Virenscan prüft über ihn und braucht dadurch kaum zusätzlichen Arbeitsspeicher – die Virensignaturen liegen nur einmal im Speicher.
+          {% else %}Du hast eigene clamscan-Prozesse gewählt; „Automatisch“ würde den Dienst mitbenutzen und Arbeitsspeicher sparen.{% endif %}
+        {% elif conf._clamd_running %}Der ClamAV-Dienst läuft, ist für ubusec aber nicht nutzbar{% if not conf._clamdscan %} (das Programm clamdscan fehlt){% endif %} – es werden eigene clamscan-Prozesse verwendet.
+        {% else %}Der ClamAV-Dienst (clamav-daemon) läuft auf diesem Server nicht – es werden eigene clamscan-Prozesse verwendet. Läuft er später (etwa für Nextcloud „Antivirus for files“), nutzt ubusec ihn automatisch mit.{% endif %}
+        Fällt der Dienst während eines Scans aus, prüft ubusec die restlichen Dateien mit clamscan.</small></label>
+    <label>Parallele Prüfungen
+      <select name="CLAM_PARALLEL" id="clam-parallel" data-fit="{{ conf._clam_fit or 1 }}" data-clamd="{{ 1 if conf._clamd_usable else 0 }}">
         <option value="0" {% if conf.get('CLAM_PARALLEL', '0') == '0' %}selected{% endif %}>Automatisch (derzeit {{ conf._auto_parallel or 1 }})</option>
         {% for n in range(1, 9) %}<option value="{{ n }}" {% if conf.get('CLAM_PARALLEL') == n|string %}selected{% endif %}>{{ n }}</option>{% endfor %}
       </select>
-      <small class="muted">Jeder Prozess nutzt einen Prozessorkern und etwa 1,5 GB Arbeitsspeicher.
+      <small class="muted">
+        {% if via_clamd %}Über den ClamAV-Dienst kostet jede weitere Prüfung nur einen Prozessorkern, keinen zusätzlichen Arbeitsspeicher. Automatisch wird höchstens die Hälfte der Kerne genutzt, damit der Dienst Mails und Uploads weiter zügig prüft.
+        {% else %}Jeder clamscan-Prozess nutzt einen Prozessorkern und etwa 1,4 GB Arbeitsspeicher.{% endif %}
         Dieser Server: {{ conf._cpus or '?' }} Kerne, {{ conf._mem_gb or '?' }} GB Arbeitsspeicher{% if conf._swap_gb and conf._swap_gb != '0' %}, {{ conf._swap_gb }} GB Swap{% endif %}.
-        Der Virenscan nutzt höchstens 40 % des Arbeitsspeichers und nie den Swap. Die Scans laufen mit niedrigster Priorität, Websites haben immer Vorrang.</small></label>
+        {% if conf._mem_limit_gb %}Speichergrenze für Scans: {{ conf._mem_limit_gb }} GB – reicht für {{ conf._clam_fit }} clamscan-Prozess{{ 'e' if conf._clam_fit != 1 }}.{% endif %}
+        Scans weichen nie in den Swap aus und laufen mit niedrigster Priorität, Websites haben immer Vorrang.</small>
+      {% set par = (conf.get('CLAM_PARALLEL', '0') or '0') | int %}
+      <p class="field-warn" id="clam-parallel-warn" {% if via_clamd or par <= (conf._clam_fit or 1) %}hidden{% endif %}>
+        Mehr clamscan-Prozesse, als in die Speichergrenze passen ({{ conf._clam_fit or 1 }}). Einzelne Prozesse werden dann vom System beendet und ihre Dateien einzeln nachgeholt – der Scan dauert dadurch länger statt kürzer.</p></label>
     <fieldset class="excl">
       <legend>Vom Virenscan ausnehmen</legend>
       <label class="check"><input type="checkbox" name="CLAM_EXCLUDE_DB" {% if conf.get('CLAM_EXCLUDE_DB', '1') == '1' %}checked{% endif %}>

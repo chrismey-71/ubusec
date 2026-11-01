@@ -160,14 +160,26 @@ Hinter einem Reverse-Proxy unbedingt `TRUST_PROXY=1` setzen – sonst sieht die 
 
 ## Virenscan: Geschwindigkeit und Ausnahmen
 
-ubusec erstellt zuerst eine Liste aller zu prüfenden Dateien und verteilt sie auf mehrere
-clamscan-Prozesse. Jeder Prozess nutzt einen Prozessorkern und etwa 1,5 GB Arbeitsspeicher;
-„Automatisch“ wählt die Anzahl passend zu Kernen und freiem Speicher (höchstens 6). Alle laufen
-mit niedrigster Priorität, Websites haben immer Vorrang.
+ubusec erstellt zuerst eine Liste aller zu prüfenden Dateien und prüft sie dann auf einem von zwei Wegen:
 
-Die Scan-Dienste dürfen höchstens 40 % des Arbeitsspeichers belegen. Wird der Speicher knapp, trifft es
-den Scanner und nicht Webserver oder Datenbank; ein vom System beendeter Teilprozess bricht den Scan nicht
-ab, seine Dateien werden danach einzeln nachgeholt.
+- **Über den ClamAV-Dienst (clamd)**, wenn er ohnehin läuft – etwa für den Virenfilter von Virtualmin oder
+  für Nextcloud „Antivirus for files“. Die Virensignaturen liegen dann nur einmal im Speicher, der Scan
+  braucht kaum zusätzlichen Arbeitsspeicher. „Automatisch“ nutzt höchstens die Hälfte der Kerne (maximal 4),
+  damit der Dienst eingehende Mails und Uploads weiter zügig prüft. Antwortet der Dienst während des Scans
+  nicht mehr, werden die restlichen Dateien mit clamscan geprüft; Dateien, die der Dienst nicht lesen darf,
+  ebenso.
+- **Mit eigenen clamscan-Prozessen**, wenn kein Dienst läuft (oder in den Einstellungen so gewählt). Jeder
+  Prozess nutzt einen Prozessorkern und etwa 1,4 GB Arbeitsspeicher; „Automatisch“ wählt die Anzahl passend
+  zu Kernen, freiem Speicher und Speichergrenze (höchstens 6).
+
+Alle Prüfungen laufen mit niedrigster Priorität, Websites haben immer Vorrang.
+
+Die Scan-Dienste dürfen höchstens 40 % des Arbeitsspeichers belegen – mindestens aber 2,5 GB, damit ein
+clamscan-Prozess sicher hineinpasst, und höchstens 75 %. Sie weichen nie in den Swap aus. Wird der Speicher
+knapp, trifft es den Scanner und nicht Webserver oder Datenbank; ein vom System beendeter Teilprozess bricht
+den Scan nicht ab, seine Dateien werden danach einzeln nachgeholt. Die Einstellungen zeigen die Grenze und
+wie viele clamscan-Prozesse hineinpassen. Die Grenze wird bei der Installation berechnet – nach einer
+Änderung des Arbeitsspeichers `sudo ubusec --install` erneut ausführen.
 
 Die Fortschrittsanzeige zeigt „Datei X von Y“, die geschätzte Restzeit und den Ordner, der gerade
 geprüft wird.

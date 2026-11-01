@@ -40,6 +40,20 @@
     form.addEventListener("change", sync); sync();
   }
 
+  // Scan-Einstellungen: Warnung, wenn mehr clamscan-Prozesse gewählt sind, als in die Speichergrenze passen
+  const par = document.getElementById("clam-parallel");
+  const parWarn = document.getElementById("clam-parallel-warn");
+  if (par && parWarn) {
+    const eng = par.form && par.form.querySelector("select[name=CLAM_ENGINE]");
+    const check = () => {
+      const viaClamd = par.dataset.clamd === "1" && (!eng || eng.value === "auto");
+      parWarn.hidden = viaClamd || Number(par.value) <= Number(par.dataset.fit || 1);
+    };
+    par.addEventListener("change", check);
+    if (eng) eng.addEventListener("change", check);
+    check();
+  }
+
   // Berichtsfilter
   const filters = document.getElementById("filters");
   if (filters) {
