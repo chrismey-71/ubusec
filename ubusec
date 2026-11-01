@@ -1588,22 +1588,77 @@ update_tools() { # Updates nur für ubusecs eigene Werkzeuge + frische Signature
   tools_state false update
 }
 
+CISOFY_KEY_URL=https://packages.cisofy.com/keys/cisofy-software-public.key
+CISOFY_KEYRING=/etc/apt/keyrings/cisofy-software-public.gpg
+CISOFY_LIST=/etc/apt/sources.list.d/cisofy-lynis.list
+# Nur die CISOfy-Quelle aktualisieren; gibt eine fehlende Schlüssel-ID aus, Rückgabe 0 = Signatur geprüft
+cisofy_apt_check() {
+  local out
+  out=$(apt-get update -q -o Dir::Etc::sourcelist="$CISOFY_LIST" -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 2>&1)
+  echo "$out" >&2
+  grep -oE 'NO_PUBKEY [0-9A-F]{16}' <<<"$out" | head -1 | cut -d' ' -f2
+  ! grep -qE 'NO_PUBKEY|is not signed|EXPKEYSIG|BADSIG|KEYEXPIRED|Could not resolve|Failed to fetch' <<<"$out"
+}
+# Primärschlüssel-Fingerabdrücke einer Schlüsseldatei
+key_primaries() { gpg --show-keys --with-colons "$1" 2>/dev/null | awk -F: '$1=="pub"{p=1;next} $1=="fpr"&&p{print $10;p=0}'; }
+# Fehlt der Signaturschlüssel in der Datei des Herstellers, den Schlüssel vom Ubuntu-Keyserver holen –
+# aber nur übernehmen, wenn er zum selben Hauptschlüssel gehört wie die Datei von cisofy.com
+cisofy_key_from_keyserver() { # ID
+  local id=$1 tmp prim new
+  tmp=$(mktemp -d)
+  echo "→ Signaturschlüssel $id fehlt in der Herstellerdatei – frage keyserver.ubuntu.com …"
+  if ! curl -fsSL -m 30 "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x$id" -o "$tmp/ks.asc"; then
+    echo "  Keyserver nicht erreichbar"; rm -rf "$tmp"; return 1
+  fi
+  prim=$(key_primaries "$CISOFY_KEYRING"); new=$(key_primaries "$tmp/ks.asc")
+  echo "  Hauptschlüssel laut cisofy.com: ${prim:-?}"
+  echo "  Hauptschlüssel laut Keyserver:  ${new:-?}"
+  if [ -z "$new" ] || [ -z "$prim" ] || ! grep -qxF -f <(echo "$prim") <<<"$new"; then
+    echo "  Abgelehnt: Der Schlüssel vom Keyserver gehört nicht zum Hauptschlüssel des Herstellers."
+    rm -rf "$tmp"; return 1
+  fi
+  if ! gpg --show-keys --with-colons "$tmp/ks.asc" 2>/dev/null | awk -F: '$1=="fpr"{print $10}' | grep -q "$id\$"; then
+    echo "  Abgelehnt: Der Keyserver-Schlüssel enthält $id nicht."; rm -rf "$tmp"; return 1
+  fi
+  gpg --dearmor --yes -o "$CISOFY_KEYRING" <"$tmp/ks.asc" && chmod 644 "$CISOFY_KEYRING"
+  echo "  Übernommen (gleicher Hauptschlüssel, enthält $id)"
+  rm -rf "$tmp"
+}
+cisofy_rollback() {
+  rm -f "$CISOFY_LIST" /etc/apt/preferences.d/lynis "$CISOFY_KEYRING"
+  apt-get update -q >/dev/null 2>&1
+  echo "→ Paketquelle wieder entfernt – damit bleiben „apt update“ und die automatischen Sicherheitsupdates fehlerfrei."
+  echo "  Lynis bleibt in der Ubuntu-Version installiert."
+}
+
 lynis_upstream() { # aktuelle Lynis-Version aus der Paketquelle des Herstellers (CISOfy)
   local log=$STATE_DIR/tools-update.log rc=0
   ensure_dirs; tools_state true lynis
   {
     echo "=== Lynis-Paketquelle des Herstellers einrichten – $(date '+%d.%m.%Y %H:%M')"
     install -d -m 0755 /etc/apt/keyrings
-    curl -fsSL https://packages.cisofy.com/keys/cisofy-software-public.key \
-      | gpg --dearmor --yes -o /etc/apt/keyrings/cisofy-software-public.gpg
-    # Schlüssel gilt nur für diese Quelle (signed-by), nicht für alle Paketquellen
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/cisofy-software-public.gpg] https://packages.cisofy.com/community/lynis/deb/ stable main" \
-      >/etc/apt/sources.list.d/cisofy-lynis.list
-    printf 'Package: lynis\nPin: origin packages.cisofy.com\nPin-Priority: 600\n' >/etc/apt/preferences.d/lynis
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -q && apt-get install -y -q lynis
-    echo "--- installiert: $(lynis show version 2>/dev/null)"
-    echo "=== fertig"
+    local tmpk; tmpk=$(mktemp)
+    if ! curl -fsSL -m 30 "$CISOFY_KEY_URL" -o "$tmpk" || ! gpg --dearmor --yes -o "$CISOFY_KEYRING" <"$tmpk"; then
+      echo "Schlüssel von $CISOFY_KEY_URL nicht ladbar"; rm -f "$tmpk"; false
+    else
+      rm -f "$tmpk"; chmod 644 "$CISOFY_KEYRING"
+      echo "Schlüssel des Herstellers:"; gpg --show-keys --with-subkey-fingerprints "$CISOFY_KEYRING" 2>/dev/null | sed 's/^/  /'
+      # Schlüssel gilt nur für diese Quelle (signed-by), nicht für alle Paketquellen
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=$CISOFY_KEYRING] https://packages.cisofy.com/community/lynis/deb/ stable main" >"$CISOFY_LIST"
+      printf 'Package: lynis\nPin: origin packages.cisofy.com\nPin-Priority: 600\n' >/etc/apt/preferences.d/lynis
+      local miss ok=1
+      miss=$(cisofy_apt_check) || ok=0
+      if [ $ok = 0 ] && [ -n "$miss" ] && cisofy_key_from_keyserver "$miss"; then
+        ok=1; miss=$(cisofy_apt_check) || ok=0
+      fi
+      if [ $ok = 0 ]; then
+        echo "FEHLER: Die Paketquelle von CISOfy lässt sich nicht sicher prüfen${miss:+ (Signaturschlüssel $miss fehlt)}."
+        cisofy_rollback; false
+      else
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get install -y -q lynis && echo "--- installiert: $(lynis show version 2>/dev/null)" && echo "=== fertig"
+      fi
+    fi
   } >"$log" 2>&1 || rc=1
   [ $rc = 0 ] || echo "=== FEHLER – siehe oben" >>"$log"
   chgrp "$(grp)" "$log"; chmod 640 "$log"
@@ -1846,7 +1901,7 @@ process_queue() { # process_queue req|ctl
           kill -0 "${spid:-0}" 2>/dev/null || sed -i 's/"running":true/"running":false/' "$STATE_DIR/status.json"
         fi ;;
       toolscheck)
-        audit "WERKZEUGE PRÜFEN $user"; check_tools >/dev/null ;;
+        audit "WERKZEUGE PRÜFEN $user"; UBUSEC_FORCE_CHECK=1 check_tools >/dev/null ;;
       toolsupdate)
         audit "WERKZEUGE AKTUALISIEREN $user"; update_tools ;;
       lynisrepo)
@@ -2090,7 +2145,7 @@ main() {
              exit 0 ;;
     queue) process_queue req; exit 0 ;;
     ctl) process_queue ctl; exit 0 ;;
-    checktools) check_tools; exit 0 ;;
+    checktools) UBUSEC_FORCE_CHECK=1 check_tools; exit 0 ;;
     updatetools) update_tools; cat "$STATE_DIR/tools-update.log"; exit 0 ;;
     lynisupstream) lynis_upstream; rc=$?; cat "$STATE_DIR/tools-update.log"; exit $rc ;;
     selfupdate) self_update "$assume_yes"; exit $? ;;

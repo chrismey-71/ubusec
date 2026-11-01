@@ -1193,7 +1193,11 @@ def mod_tools(raw, full):
     me = {"installed": os.environ.get("UBUSEC_VERSION", ""), "repo": os.environ.get("UBUSEC_REPO", ""),
           "latest": "", "notes": "", "url": "", "checked": int(time.time()), "check": os.environ.get("UPDATE_CHECK", "1") == "1"}
     if me["check"] and me["repo"]:
-        rel = get_json("https://api.github.com/repos/%s/releases/latest" % me["repo"], "gh-ubusec-latest", 21600)
+        # „Jetzt prüfen“ fragt sofort nach; ein Cache-Stand älter als die installierte Version ist sicher veraltet
+        force = os.environ.get("UBUSEC_FORCE_CHECK") == "1"
+        rel = get_json("https://api.github.com/repos/%s/releases/latest" % me["repo"], "gh-ubusec-latest", 0 if force else 21600)
+        if isinstance(rel, dict) and rel.get("tag_name") and vt(rel["tag_name"].lstrip("v")) < vt(me["installed"]):
+            rel = get_json("https://api.github.com/repos/%s/releases/latest" % me["repo"], "gh-ubusec-latest", 0) or rel
         if isinstance(rel, dict) and rel.get("tag_name"):
             me.update(latest=rel["tag_name"].lstrip("v"), notes=(rel.get("body") or "")[:6000], url=rel.get("html_url", ""))
             if vt(me["latest"]) > vt(me["installed"]):

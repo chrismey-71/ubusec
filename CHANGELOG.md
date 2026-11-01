@@ -7,6 +7,12 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 - Behoben: „Als Fehlalarm ausblenden“ und „Baseline übernehmen“ in der Weboberfläche wurden abgelehnt
   („Aktion … in der Scan-Warteschlange“). Ausgeblendete Meldungen verschwinden jetzt sofort aus Übersicht
   und Empfehlungen, nicht erst nach dem nächsten Scan.
+- Behoben: Die Seite „Werkzeuge“ zeigte nach einem Update eine ältere Version als „Neueste Version“ (veralteter
+  Zwischenspeicher). „Jetzt prüfen“ fragt GitHub jetzt immer sofort.
+- Lynis-Paketquelle des Herstellers: Kann apt die Quelle nicht prüfen (z. B. NO_PUBKEY nach einem Schlüsselwechsel
+  bei CISOfy), holt ubusec den fehlenden Signaturschlüssel vom Ubuntu-Keyserver – aber nur, wenn er zum selben
+  Hauptschlüssel gehört wie die Schlüsseldatei von cisofy.com. Klappt das nicht, wird die Quelle wieder entfernt,
+  damit „apt update“ und die automatischen Sicherheitsupdates fehlerfrei bleiben.
 
 ## 1.4.1 – 2026-11-01
 
