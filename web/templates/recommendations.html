@@ -4,6 +4,12 @@
 {% block content %}
 <h1>Empfehlungen</h1>
 <p class="lede">Alle offenen Punkte aus der jeweils letzten Prüfung jedes Bereichs, das Wichtigste zuerst. Zu jedem Punkt steht, warum er zählt und wie du ihn behebst.</p>
+{% if todo or lynis %}
+<p class="export-line"><span class="muted">Alle Empfehlungen herunterladen:</span>
+  <a href="{{ url_for('recommendations_export', fmt='html') }}">Zum Lesen und Drucken (HTML)</a>
+  <a href="{{ url_for('recommendations_export', fmt='csv') }}">Als Tabelle zum Abhaken (CSV)</a>
+  <a href="{{ url_for('recommendations_export', fmt='md') }}">Als Text (Markdown)</a></p>
+{% endif %}
 
 {% if not todo %}
   <p class="ok-line big">Keine offenen Punkte. {% if state.missing %}Noch nicht geprüft: {{ state.missing | titles }}.{% endif %}</p>

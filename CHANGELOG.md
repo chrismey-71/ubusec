@@ -4,6 +4,9 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- **Empfehlungen herunterladen:** Auf der Seite „Empfehlungen“ lassen sich alle offenen Punkte samt Begründung und
+  Behebung als HTML (zum Lesen und Drucken), als CSV-Tabelle (mit Spalte „Erledigt“ zum Abhaken in Excel/LibreOffice)
+  oder als Markdown-Text herunterladen; inklusive der Härtungsvorschläge von Lynis.
 - rkhunter-Warnung „Suspicious file types found in /dev“ wird überprüft: Dateien in /dev/shm, die nur bekannte Dienste
   als gemeinsamen Speicher nutzen (z. B. Apache: ShM.<Prüfsumme>, PostgreSQL, PHP-FPM, Collabora), erscheinen als
   erkannter Fehlalarm; Programmdateien oder unbekannte Nutzer bleiben ein Befund.

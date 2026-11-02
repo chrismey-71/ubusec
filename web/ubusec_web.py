@@ -428,6 +428,111 @@ def timer_info():
     return out
 
 
+# ------------------------------------------------------------ Export der Empfehlungen ---
+GROUP_TITLE = {"KRITISCH": "Sofort handeln", "HOCH": "Bald beheben", "MITTEL": "Bei Gelegenheit verbessern",
+               "NIEDRIG": "Feinschliff"}
+
+
+def export_context(state, todo, lynis):
+    """Gemeinsame Daten für alle Exportformate."""
+    host = next((r.get("host") for r in state["sources"].values() if r.get("host")), "")
+    items = []
+    for f in todo:
+        h = f.get("hint") or {}
+        src = state["sources"].get(f["module"], {})
+        items.append({
+            "severity": f["severity"], "module": MOD_TITLE.get(f["module"], f["module"]), "message": f["message"],
+            "details": [d for d in f.get("details", []) if not d.startswith("… und ")],
+            "why": h.get("why", ""), "effort": h.get("effort", ""),
+            "steps": [(st[2:], True) if st.startswith("$ ") else (st, False) for st in h.get("steps", [])],
+            "checked": datetime.fromtimestamp(src.get("finished", 0)).strftime("%d.%m.%Y %H:%M") if src.get("finished") else "",
+            "new": f.get("new", False)})
+    return {"host": host, "created": datetime.now().strftime("%d.%m.%Y %H:%M"), "score": state.get("score"),
+            "counts": state.get("counts", {}), "items": items, "lynis": lynis}
+
+
+def export_markdown(c):
+    L = ["# ubusec – Empfehlungen%s" % (" für " + c["host"] if c["host"] else ""), "",
+         "Erstellt am %s mit ubusec %s · Sicherheitswert %s von 100" % (c["created"], VERSION, c["score"]), "",
+         " · ".join("%s %d" % (SEV_NAME[s], c["counts"].get(s, 0)) for s in SEVERITIES if s != "INFO"), ""]
+    for s in SEVERITIES[:-1]:
+        group = [i for i in c["items"] if i["severity"] == s]
+        if not group:
+            continue
+        L += ["## %s (%d)" % (GROUP_TITLE[s], len(group)), ""]
+        for n, i in enumerate(group, 1):
+            L += ["### %d. %s%s" % (n, i["message"], " (neu)" if i["new"] else ""), "",
+                  "*%s · %s · geprüft %s%s*" % (SEV_NAME[s], i["module"], i["checked"],
+                                                  " · Aufwand: " + i["effort"] if i["effort"] else ""), ""]
+            L += ["- %s" % d for d in i["details"]] + ([""] if i["details"] else [])
+            if i["why"]:
+                L += ["**Warum:** " + i["why"], ""]
+            if i["steps"]:
+                L += ["**So behebst du es:**", ""]
+                for txt, cmd in i["steps"]:
+                    L += ["```bash", txt, "```"] if cmd else ["- " + txt]
+                L += [""]
+    if c["lynis"]:
+        L += ["## Härtungsvorschläge von Lynis (%d)" % len(c["lynis"]), "",
+              "Details: `sudo lynis show details TEST-ID`", ""] + ["- " + x for x in c["lynis"]] + [""]
+    return "\n".join(L)
+
+
+def export_csv(c):
+    import csv
+    import io
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    w.writerow(["Schweregrad", "Bereich", "Meldung", "Details", "Warum", "Behebung", "Aufwand", "Geprüft", "Neu", "Erledigt"])
+    for i in c["items"]:
+        w.writerow([SEV_NAME[i["severity"]], i["module"], i["message"], "\n".join(i["details"]), i["why"],
+                    "\n".join(t for t, _ in i["steps"]), i["effort"], i["checked"], "ja" if i["new"] else "", ""])
+    for x in c["lynis"]:
+        w.writerow(["Lynis", "Konfiguration & Härtung", x, "", "", "sudo lynis show details " + x.rsplit("[", 1)[-1].rstrip("]"),
+                    "", "", "", ""])
+    return "﻿" + buf.getvalue()   # BOM, damit Excel die Umlaute richtig liest
+
+
+def export_html(c):
+    from html import escape as e
+    color = {"KRITISCH": "#a3191e", "HOCH": "#cc4a17", "MITTEL": "#9c6c00", "NIEDRIG": "#48708f"}
+    H = ['<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
+         "<title>ubusec – Empfehlungen %s</title><style>" % e(c["host"]),
+         "body{font:15px/1.5 system-ui,sans-serif;color:#15233c;max-width:860px;margin:2rem auto;padding:0 16px}"
+         "h1{font-size:1.6rem;margin:0}h2{margin-top:2rem;border-bottom:2px solid #c8d1db;padding-bottom:.2rem}"
+         "h3{font-size:1.05rem;margin:1.4rem 0 .2rem}.meta{color:#56627a;font-size:.9rem}"
+         "pre{background:#eef2f6;padding:.5rem .7rem;border-radius:4px;white-space:pre-wrap;word-break:break-all;font-size:.88rem}"
+         ".it{border-left:4px solid var(--c);padding-left:.8rem;break-inside:avoid}ul{padding-left:1.2rem}"
+         "@media print{body{margin:0;font-size:12px}h2{break-after:avoid}}</style></head><body>",
+         "<h1>ubusec – Empfehlungen%s</h1>" % (" für " + e(c["host"]) if c["host"] else ""),
+         '<p class="meta">Erstellt am %s mit ubusec %s · Sicherheitswert %s von 100 · %s</p>' % (
+             e(c["created"]), e(VERSION), e(str(c["score"])),
+             " · ".join("%s %d" % (SEV_NAME[s], c["counts"].get(s, 0)) for s in SEVERITIES if s != "INFO"))]
+    for s in SEVERITIES[:-1]:
+        group = [i for i in c["items"] if i["severity"] == s]
+        if not group:
+            continue
+        H.append('<h2 style="color:%s">%s (%d)</h2>' % (color[s], GROUP_TITLE[s], len(group)))
+        for n, i in enumerate(group, 1):
+            H.append('<div class="it" style="--c:%s"><h3>%d. %s%s</h3><p class="meta">%s · %s · geprüft %s%s</p>' % (
+                color[s], n, e(i["message"]), " (neu)" if i["new"] else "", SEV_NAME[s], e(i["module"]), e(i["checked"]),
+                " · Aufwand: " + e(i["effort"]) if i["effort"] else ""))
+            if i["details"]:
+                H.append("<ul>" + "".join("<li>%s</li>" % e(d) for d in i["details"]) + "</ul>")
+            if i["why"]:
+                H.append("<p><b>Warum:</b> %s</p>" % e(i["why"]))
+            if i["steps"]:
+                H.append("<p><b>So behebst du es:</b></p>")
+                for txt, cmd in i["steps"]:
+                    H.append("<pre>%s</pre>" % e(txt) if cmd else "<p>%s</p>" % e(txt))
+            H.append("</div>")
+    if c["lynis"]:
+        H.append("<h2>Härtungsvorschläge von Lynis (%d)</h2><p class=\"meta\">Details: sudo lynis show details TEST-ID</p><ul>%s</ul>"
+                 % (len(c["lynis"]), "".join("<li>%s</li>" % e(x) for x in c["lynis"])))
+    H.append("</body></html>")
+    return "\n".join(H)
+
+
 def lynis_suggestions(state):
     src = state["sources"].get("config")
     if not src:
@@ -800,6 +905,21 @@ def create_app():
         todo = [f for f in state["findings"] if f["severity"] != "INFO"]
         return render_template("recommendations.html", state=state, todo=todo,
                                lynis=lynis_suggestions(state))
+
+    @app.route("/empfehlungen/export.<fmt>")
+    def recommendations_export(fmt):
+        if fmt not in ("md", "csv", "html"):
+            abort(404)
+        state = current_state(all_reports(60))
+        todo = [f for f in state["findings"] if f["severity"] != "INFO"]
+        c = export_context(state, todo, lynis_suggestions(state))
+        body = {"md": export_markdown, "csv": export_csv, "html": export_html}[fmt](c)
+        mime = {"md": "text/markdown", "csv": "text/csv", "html": "text/html"}[fmt]
+        name = "ubusec-empfehlungen-%s-%s.%s" % (re.sub(r"[^A-Za-z0-9.-]", "_", c["host"] or "server"),
+                                                 datetime.now().strftime("%Y%m%d"), fmt)
+        resp = Response(body, mimetype=mime + "; charset=utf-8")
+        resp.headers["Content-Disposition"] = 'attachment; filename="%s"' % name
+        return resp
 
     @app.route("/baseline", methods=["POST"])
     def accept_baseline():
