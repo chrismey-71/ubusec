@@ -4,6 +4,8 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- Behoben: Auf neueren Ubuntu-Versionen (z. B. 26.04) legte die Installation /usr/local/lib/ubusec nur für root
+  lesbar an; die Weboberfläche startete dann nicht („Permission denied“).
 - Installation der Weboberfläche: ubusec prüft, ob der Dienstbenutzer die Programmdateien lesen kann, und zeigt
   sonst die Berechtigungen aller Ordner auf dem Weg an (statt dass der Dienst später mit „Permission denied“ scheitert).
 - Behoben: „sudo lynis show details TEST-ID“ fand kein Protokoll. ubusec legt Lynis-Protokoll und -Bericht jetzt

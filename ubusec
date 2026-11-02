@@ -1491,7 +1491,7 @@ do_install() {
   [ "$SELF_PATH" != "$INSTALL_PATH" ] && install -m 0750 -o root -g root "$SELF_PATH" "$INSTALL_PATH"
   ensure_dirs
   if [ -f "$SRC_DIR/checks/webcheck.py" ] && [ "$(readlink -f "$SRC_DIR/checks")" != "$CHECK_DIR" ]; then
-    install -d -m 0755 "$CHECK_DIR"; install -m 0644 "$SRC_DIR/checks/webcheck.py" "$CHECK_DIR/webcheck.py"
+    install -d -m 0755 /usr/local/lib/ubusec "$CHECK_DIR"; install -m 0644 "$SRC_DIR/checks/webcheck.py" "$CHECK_DIR/webcheck.py"
   fi
   write_conf
   configure_rkhunter
@@ -2027,7 +2027,7 @@ do_install_web() {
     --home-dir /nonexistent --shell /usr/sbin/nologin "$WEB_GROUP"
   local src=$SRC_DIR/web
   if [ -f "$src/ubusec_web.py" ] && [ "$(readlink -f "$src")" != "$WEB_DIR" ]; then
-    rm -rf "$WEB_DIR"; install -d -m 0755 "$WEB_DIR"
+    rm -rf "$WEB_DIR"; install -d -m 0755 /usr/local/lib/ubusec "$WEB_DIR"
     cp -r "$src/." "$WEB_DIR/"
     chown -R root:root "$WEB_DIR"; find "$WEB_DIR" -type d -exec chmod 755 {} +; find "$WEB_DIR" -type f -exec chmod 644 {} +
   fi
