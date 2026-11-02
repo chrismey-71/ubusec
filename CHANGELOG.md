@@ -2,6 +2,15 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## Unveröffentlicht
+
+- **Schnellscan prüft nur geänderte Dateien:** Nach dem ersten vollständigen Virenscan prüft der tägliche Schnellscan
+  alle seither neuen oder geänderten Dateien im ganzen System (maßgeblich ist die vom Dateisystem gesetzte ctime, die
+  sich nicht zurückdatieren lässt) – statt nur einiger Ordner und meist in wenigen Minuten. Der Vollscan prüft
+  weiterhin jede Datei mit den neuesten Signaturen. Bei einem Fund rückt der Ausgangspunkt nicht vor, die Datei wird
+  also bei jedem Schnellscan erneut gemeldet. Hinweis, wenn der letzte Vollscan länger als 10 Tage zurückliegt.
+  Abschaltbar unter Einstellungen → Scan-Einstellungen.
+
 ## 1.4.4 – 2026-11-02
 
 - **„Soll ubusec das für dich ändern?“** – Korrekturen auf Knopfdruck für eindeutig umsetzbare Punkte:

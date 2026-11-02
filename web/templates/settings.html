@@ -162,6 +162,12 @@
     <label>Ordner für den Virenscan beim Schnellscan
       <input name="CLAM_PATHS_QUICK" value="{{ conf.CLAM_PATHS_QUICK }}">
       <small class="muted">Mit Leerzeichen getrennt. Beim Vollscan wird immer das ganze System durchsucht.</small></label>
+    <label class="check"><input type="checkbox" name="CLAM_QUICK_CHANGED" {% if conf.get('CLAM_QUICK_CHANGED', '1') == '1' %}checked{% endif %}>
+      <span>Schnellscan: nur geänderte Dateien<br><small class="muted">Der tägliche Schnellscan prüft dann alle seit dem letzten
+        vollständigen Virenscan neuen oder geänderten Dateien im ganzen System – meist in wenigen Minuten. Der Vollscan prüft
+        weiterhin jede Datei mit den neuesten Signaturen; so werden auch ältere Dateien erkannt, für die es erst später eine
+        Signatur gibt.
+        {% if conf._clam_last_full %}Letzter vollständiger Virenscan: {{ conf._clam_last_full | dt }}.{% else %}Noch kein vollständiger Virenscan – bis dahin prüft der Schnellscan die oben genannten Ordner.{% endif %}</small></span></label>
     <label>Größte geprüfte Datei
       <select name="CLAM_MAX_FILESIZE">
         {% for v in ['25M', '50M', '100M', '200M', '400M'] %}<option value="{{ v }}" {% if conf.get('CLAM_MAX_FILESIZE', '100M') == v %}selected{% endif %}>{{ v[:-1] }} MB</option>{% endfor %}
