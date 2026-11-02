@@ -71,10 +71,27 @@ _H = [
                "Einzelne Meldung gezielt beheben: sudo pro fix USN-xxxx-x",
                "Bleibt die Meldung nach dem Upgrade bestehen, liegt der Fix in ESM: sudo pro attach <token>"],
         effort="15 Min")),
+    (r"^cve\|\d+ Pakete erhalten Sicherheitskorrekturen nur mit Ubuntu Pro", dict(
+        why="Diese Pakete stammen meist aus „universe“ (z. B. FFmpeg, ImageMagick, 7-Zip). Ubuntu selbst liefert dafür keine "
+            "Korrekturen; Canonical stellt sie nur über Ubuntu Pro (ESM) bereit. Ohne Pro bleiben die Lücken offen.",
+        steps=["Weg 1 – Ubuntu Pro: für den persönlichen, nicht-kommerziellen Einsatz kostenlos (bis 5 Rechner). "
+               "Token auf https://ubuntu.com/pro holen, dann:",
+               "$ sudo pro attach <token>",
+               "$ sudo apt update && sudo apt upgrade",
+               "Weg 2 – ohne Pro: nicht benötigte Pakete entfernen. Vorher prüfen, was mit entfernt würde:",
+               "$ sudo apt purge --simulate <paket>",
+               "Typisch verzichtbar auf Webservern: ffmpeg (nur für Video-Vorschauen in Nextcloud), 7zip/p7zip, zvbi, "
+               "libcjson (meist Teil von ffmpeg). ImageMagick nutzen WordPress und Nextcloud für Bildvorschauen – "
+               "dort lieber PHP-GD verwenden (php-gd) und Imagick nur entfernen, wenn Vorschauen weiter funktionieren.",
+               "$ sudo apt autoremove",
+               "Weg 3 – Risiko eingrenzen: Die meisten dieser Lücken greifen nur, wenn ein Angreifer eine präparierte Datei "
+               "verarbeiten lässt (Video, Bild, Archiv). Uploads von Fremden einschränken senkt das Risiko."],
+        effort="15 Min")),
     (r"^cve\|\d+ Sicherheitsmeldungen", dict(
         why="Für installierte Pakete sind Sicherheitslücken mit verfügbarem Fix bekannt.",
         steps=["$ sudo apt update && sudo apt upgrade",
-               "Bleibt die Meldung bestehen: Fix liegt in ESM (Ubuntu Pro), sudo pro attach <token>"],
+               "Bleibt die Meldung bestehen, liegt der Fix nur in Ubuntu Pro (ESM) – welche Pakete das sind und was ohne Pro "
+               "möglich ist, steht im Befund „… Pakete erhalten Sicherheitskorrekturen nur mit Ubuntu Pro“."],
         effort="15 Min")),
     (r"^cve\|Ubuntu-OVAL-Daten konnten nicht", dict(
         why="Ohne die Schwachstellendaten von Canonical findet die CVE-Prüfung nichts.",

@@ -19,10 +19,12 @@
 {% endmacro %}
 
 {% macro finding(f, r, open=false, actions=true) %}
-<details class="finding sev-{{ f.severity|lower }}" id="f-{{ r.id }}-{{ f.idx }}" data-sev="{{ f.severity }}" data-new="{{ 1 if f.new else 0 }}" {% if open %}open{% endif %}>
+<details class="finding sev-{{ f.severity|lower }}" id="f-{{ r.id }}-{{ f.idx }}" data-sev="{{ f.severity }}" data-new="{{ 1 if f.new else 0 }}"
+  data-effort="{{ f.hint.effort | effort_rank }}" data-egroup="{{ f.hint.effort | effort_group }}" {% if open %}open{% endif %}>
   <summary>
     <span class="sev">{{ SEV_NAME[f.severity] }}</span>
     <span class="msg">{{ f.message }}{% if f.new %} <span class="new">neu</span>{% endif %}</span>
+    {% if f.hint.effort and f.hint.effort != '—' %}<span class="eff-tag">{{ f.hint.effort }}</span>{% endif %}
   </summary>
   <div class="body">
     {% if f.details %}

@@ -175,7 +175,7 @@ input[type=checkbox], input[type=radio] { accent-color: var(--action); width: 1.
 /* ------------------------------------------------------------- Befunde --- */
 .finding { border-left: 4px solid var(--c); background: var(--surface); margin: .4rem 0; border-radius: 0 6px 6px 0; }
 .finding > summary {
-  display: grid; grid-template-columns: 5.2rem minmax(0, 1fr); gap: .75rem; align-items: baseline;
+  display: grid; grid-template-columns: 5.2rem minmax(0, 1fr) auto; gap: .75rem; align-items: baseline;
   padding: .7rem 1rem; cursor: pointer; list-style: none;
 }
 .finding > summary::-webkit-details-marker { display: none; }
@@ -375,3 +375,6 @@ pre.notes { white-space: pre-wrap; font-family: var(--sans); font-size: .95rem; 
 .field-warn { margin: .4rem 0 0; padding: .5rem .75rem; border-left: 4px solid var(--mittel); background: var(--mittel-bg); border-radius: 4px; font-size: .9rem; }
 .field-warn[hidden] { display: none; }
 .export-line { display: flex; flex-wrap: wrap; gap: .4rem 1.25rem; align-items: baseline; margin: -.25rem 0 1.5rem; }
+.effort-bar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: 1.25rem 0 .5rem; font-size: .9rem; }
+.effort-bar[hidden], #effort-flat[hidden], .sev-group[hidden] { display: none; }
+.eff-tag { justify-self: end; font-size: .78rem; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 0 .5rem; white-space: nowrap; }

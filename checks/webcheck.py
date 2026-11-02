@@ -781,6 +781,11 @@ def wpscan_vulns(slug, version):
 def check_wordpress(path, vh):
     site = url_for(path, vh)
     label = site[0] + (site[2] if site[2] != "/" else "") if site else path
+    try:
+        owner = pwd.getpwuid(os.stat(path).st_uid).pw_name
+    except (OSError, KeyError):
+        owner = "<benutzer>"
+    wpcli = shutil_which("wp")
     ver = ver_wordpress(path)
     if ver:
         sc = get_json("https://api.wordpress.org/core/stable-check/1.0/", "wp-stable-check")
@@ -801,6 +806,9 @@ def check_wordpress(path, vh):
             if v and vt(v) < vt(latest):
                 if kind == "plugin":
                     agg("MITTEL", "WordPress-Plugins mit verfügbaren Updates", "%s – %s %s → %s" % (label, slug, v, latest))
+                    if wpcli:
+                        agg("MITTEL", "WordPress-Plugins mit verfügbaren Updates",
+                            "Befehl: sudo -u %s wp plugin update %s --path=%s" % (owner, slug, path))
                 else:
                     agg("NIEDRIG", "WordPress-Themes mit verfügbaren Updates", "%s – %s %s → %s" % (label, slug, v, latest))
             if kind == "plugin":
@@ -815,12 +823,18 @@ def check_wordpress(path, vh):
         agg("MITTEL", "WordPress: Debug-Modus zeigt Fehler öffentlich an", label)
     if c and not re.search(r"define\(\s*['\"]DISALLOW_FILE_EDIT['\"]\s*,\s*true", c, re.I):
         agg("NIEDRIG", "WordPress: Datei-Editor im Backend aktiv", label)
+        agg("NIEDRIG", "WordPress: Datei-Editor im Backend aktiv",
+            "%s: in %s vor der Zeile „/* That's all, stop editing! …“ einfügen: define('DISALLOW_FILE_EDIT', true);" % (label, cfg))
     if c and world_readable(cfg):
         agg("MITTEL", "WordPress: wp-config.php für alle Benutzer des Servers lesbar", cfg)
+        agg("MITTEL", "WordPress: wp-config.php für alle Benutzer des Servers lesbar", "Befehl: sudo chmod 640 %s" % cfg)
     up = os.path.join(path, "wp-content", "uploads")
     if os.path.isdir(up) and not re.search(r"(?i)(php_flag\s+engine\s+off|Require all denied|Deny from all|SetHandler\s+none)",
                                          read(os.path.join(up, ".htaccess"))):
         agg("NIEDRIG", "WordPress: PHP-Ausführung im Upload-Ordner nicht gesperrt", label)
+        agg("NIEDRIG", "WordPress: PHP-Ausführung im Upload-Ordner nicht gesperrt",
+            "Befehl: printf '<FilesMatch \"\\\\.(php|phtml|php[0-9])$\">\\n  Require all denied\\n</FilesMatch>\\n' | sudo -u %s tee -a %s/.htaccess"
+            % (owner, up))
     if site:
         dom, ip, rel = site
         base = rel.rstrip("/")
@@ -828,6 +842,9 @@ def check_wordpress(path, vh):
                   b"<?xml version='1.0'?><methodCall><methodName>system.listMethods</methodName></methodCall>", ctype="text/xml")
         if x and x.status == 200 and b"<methodResponse>" in x.body and b"wp." in x.body:
             agg("NIEDRIG", "WordPress: xmlrpc.php öffentlich aktiv (Angriffsfläche für Passwort-Raten)", label)
+            agg("NIEDRIG", "WordPress: xmlrpc.php öffentlich aktiv (Angriffsfläche für Passwort-Raten)",
+                "%s: in %s/.htaccess oberhalb von „# BEGIN WordPress“ einfügen: <Files xmlrpc.php> Require all denied </Files>"
+                % (label, path))
         u = fetch(dom, ip, base + "/wp-json/wp/v2/users", limit=8192)
         if u and u.status == 200 and u.body.lstrip().startswith(b"[{") and b'"slug"' in u.body:
             agg("NIEDRIG", "WordPress: Benutzernamen öffentlich auslesbar", label + " (über /wp-json/wp/v2/users)")

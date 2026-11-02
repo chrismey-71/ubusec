@@ -428,6 +428,22 @@ def timer_info():
     return out
 
 
+def effort_rank(e):
+    """Aufwand als Zahl zum Sortieren: sofort < 5 Min < … < 1 Std < prüfen."""
+    e = (e or "").strip().lower()
+    if e == "sofort":
+        return 1
+    m = re.match(r"(\d+)\s*(min|std)", e)
+    if m:
+        return int(m.group(1)) * (60 if m.group(2) == "std" else 1)
+    return 999   # „prüfen“ / unbekannt
+
+
+def effort_group(e):
+    r = effort_rank(e)
+    return "kurz" if r <= 5 else "mittel" if r <= 30 else "lang" if r < 999 else "pruefen"
+
+
 # ------------------------------------------------------------ Export der Empfehlungen ---
 GROUP_TITLE = {"KRITISCH": "Sofort handeln", "HOCH": "Bald beheben", "MITTEL": "Bei Gelegenheit verbessern",
                "NIEDRIG": "Feinschliff"}
@@ -827,10 +843,21 @@ def create_app():
     def f_titles(mods):
         return ", ".join(MOD_TITLE.get(m, m) for m in mods)
 
+    @app.template_filter("effort_group")
+    def f_effort_group(e):
+        return effort_group(e)
+
+    @app.template_filter("effort_rank")
+    def f_effort_rank(e):
+        return effort_rank(e)
+
     @app.template_filter("detail")
     def f_detail(d, r):
         from markupsafe import Markup, escape
         raw = (r or {}).get("raw_dir", "")
+        if d.startswith("Befehl: "):     # konkreter Befehl zum Kopieren
+            c = d[8:]
+            return Markup('<span class="cmdline"><code>%s</code><button type="button" class="copy" data-copy="%s">Kopieren</button></span>') % (c, c)
         if not raw or raw not in d:
             return escape(d)
         parts = re.split(re.escape(raw) + r"/([A-Za-z0-9._-]+)", d)

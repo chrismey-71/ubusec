@@ -25,10 +25,22 @@
   <p class="ok-line big">Keine offenen Punkte. {% if state.missing %}Noch nicht geprüft: {{ state.missing | titles }}.{% endif %}</p>
 {% else %}
   {{ ui.strip(todo) }}
+  <form class="effort-bar" id="effort-bar" hidden>
+    <span class="muted">Ordnen:</span>
+    <label class="chip"><input type="radio" name="order" value="sev" checked> nach Wichtigkeit</label>
+    <label class="chip"><input type="radio" name="order" value="effort"> schnell erledigt zuerst</label>
+    <span class="muted">Aufwand:</span>
+    <label class="chip"><input type="checkbox" name="eg" value="kurz" checked> bis 5 Min</label>
+    <label class="chip"><input type="checkbox" name="eg" value="mittel" checked> bis 30 Min</label>
+    <label class="chip"><input type="checkbox" name="eg" value="lang" checked> länger</label>
+    <label class="chip"><input type="checkbox" name="eg" value="pruefen" checked> erst prüfen</label>
+    <span class="muted" id="effort-count"></span>
+  </form>
+  <section id="effort-flat" hidden><h2>Schnell erledigt zuerst</h2></section>
   {% for s in SEVERITIES if s != 'INFO' %}
     {% set group = todo | selectattr('severity', 'equalto', s) | list %}
     {% if group %}
-    <section>
+    <section class="sev-group">
       <h2 class="sev-head sev-{{ s|lower }}">{{ {'KRITISCH': 'Sofort handeln', 'HOCH': 'Bald beheben', 'MITTEL': 'Bei Gelegenheit verbessern', 'NIEDRIG': 'Feinschliff'}[s] }} <span class="muted">{{ group|length }}</span></h2>
       {% for f in group %}{{ ui.finding(f, state.sources[f.module]) }}{% endfor %}
     </section>

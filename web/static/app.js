@@ -54,6 +54,46 @@
     check();
   }
 
+  // Empfehlungen: nach Aufwand ordnen und filtern
+  const ebar = document.getElementById("effort-bar");
+  if (ebar) {
+    ebar.hidden = false;
+    const flat = document.getElementById("effort-flat");
+    const items = Array.from(document.querySelectorAll(".sev-group details.finding"));
+    const home = new Map(items.map((el) => [el, { parent: el.parentNode, next: el.nextSibling }]));
+    const sevRank = { KRITISCH: 0, HOCH: 1, MITTEL: 2, NIEDRIG: 3 };
+    const KEY = "ubusec-effort";
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEY) || "null");
+      if (saved) {
+        ebar.querySelector("input[value=" + saved.order + "]").checked = true;
+        ebar.querySelectorAll("input[name=eg]").forEach((c) => { c.checked = saved.groups.includes(c.value); });
+      }
+    } catch (_) { /* ohne gespeicherte Auswahl */ }
+    const applyEffort = () => {
+      const order = ebar.querySelector("input[name=order]:checked").value;
+      const groups = Array.from(ebar.querySelectorAll("input[name=eg]:checked")).map((c) => c.value);
+      try { localStorage.setItem(KEY, JSON.stringify({ order, groups })); } catch (_) { /* egal */ }
+      if (order === "effort") {
+        items.slice().sort((a, b) => (+a.dataset.effort - +b.dataset.effort) || (sevRank[a.dataset.sev] - sevRank[b.dataset.sev]))
+          .forEach((el) => flat.appendChild(el));
+      } else {
+        items.forEach((el) => { const h = home.get(el); h.parent.appendChild(el); });
+        // ursprüngliche Reihenfolge wiederherstellen
+        items.forEach((el) => home.get(el).parent.appendChild(el));
+      }
+      let shown = 0;
+      items.forEach((el) => { el.hidden = !groups.includes(el.dataset.egroup); if (!el.hidden) shown++; });
+      flat.hidden = order !== "effort";
+      document.querySelectorAll(".sev-group").forEach((sec) => {
+        sec.hidden = order === "effort" || !sec.querySelector("details.finding:not([hidden])");
+      });
+      document.getElementById("effort-count").textContent = shown + " von " + items.length + " Punkten";
+    };
+    ebar.addEventListener("change", applyEffort);
+    applyEffort();
+  }
+
   // Berichtsfilter
   const filters = document.getElementById("filters");
   if (filters) {

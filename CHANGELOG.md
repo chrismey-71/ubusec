@@ -4,6 +4,13 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.4.4 – 2026-11-02
 
+- **Empfehlungen nach Aufwand:** Jeder Punkt zeigt seinen Aufwand; die Liste lässt sich „schnell erledigt zuerst“
+  ordnen und nach Aufwand filtern (bis 5 Min, bis 30 Min, länger, erst prüfen). Die Auswahl wird gemerkt.
+- **Ohne Ubuntu Pro:** Neuer Befund listet die Pakete, die Sicherheitskorrekturen nur über Ubuntu Pro (ESM) erhalten,
+  mit dem Grund, warum sie installiert sind; der Hinweis erklärt die Wege mit und ohne Pro.
+- **WordPress:** Befunde enthalten jetzt die konkreten Befehle bzw. Dateien für jede Website (chmod für wp-config.php,
+  DISALLOW_FILE_EDIT, .htaccess für Uploads und xmlrpc.php, mit WP-CLI auch Plugin-Updates) – mit Kopieren-Knopf.
+- **Öffentliche Ports:** konkreter Vorschlag je Dienst (z. B. rpcbind abschalten, FTP durch SFTP ersetzen).
 - **KI-Fassung der Empfehlungen:** Neuer Download auf der Seite „Empfehlungen“ zum Einfügen in eine KI – mit
   Arbeitsauftrag; eigene Domains, Systembenutzer, öffentliche IP-Adressen, E-Mail-Adressen, Prüfsummen und Dateinamen
   aus Nextcloud-Ablagen werden durch Platzhalter ersetzt. Dazu eine Zuordnungsliste nur für dich.

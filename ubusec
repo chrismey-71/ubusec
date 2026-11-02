@@ -323,6 +323,33 @@ PY
     take "$RAW/cve-$s.txt" 8
     add "$sev" cve "$n Sicherheitsmeldungen (USN) der Stufe $s offen – $cves CVEs" "${ITEMS[@]}"
   done
+  # Welche Pakete bekommen Sicherheitskorrekturen nur über Ubuntu Pro (ESM)? – und warum sind sie installiert?
+  if have pro && ! pro status --format json 2>/dev/null | grep -q '"attached": *true'; then
+    pro security-status --format json 2>/dev/null >"$RAW/pro-security-status.json"
+    python3 -I - "$RAW/pro-security-status.json" >"$RAW/esm-packages.txt" 2>/dev/null <<'PY2'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+for p in d.get("packages", []):
+    if p.get("service_name") in ("esm-apps", "esm-infra") and p.get("status") in ("pending_attach", "pending_enable"):
+        print(p.get("package", ""), p.get("service_name", ""))
+PY2
+    if [ -s "$RAW/esm-packages.txt" ]; then
+      local pkg svc why lines=() manual
+      manual=$(apt-mark showmanual 2>/dev/null)
+      while read -r pkg svc; do
+        if grep -qx "$pkg" <<<"$manual"; then why="direkt installiert (von dir oder Virtualmin)"
+        else why="benötigt von: $(apt-cache rdepends --installed --no-suggests --no-enhances "$pkg" 2>/dev/null | sed '1,2d; s/^ *|*//' | sort -u | head -3 | paste -sd, - | sed 's/,/, /g')"; fi
+        lines+=("$pkg – $why")
+      done < <(sort -u "$RAW/esm-packages.txt")
+      local np=${#lines[@]}
+      (( np > 12 )) && lines=("${lines[@]:0:12}" "… und $(( np - 12 )) weitere (Liste: $RAW/esm-packages.txt)")
+      add MITTEL cve "$np Pakete erhalten Sicherheitskorrekturen nur mit Ubuntu Pro (ESM)" "${lines[@]}" \
+        "Ohne Ubuntu Pro: Nicht benötigte Pakete entfernen (sudo apt purge <paket>; danach sudo apt autoremove)"
+    fi
+  fi
   add INFO cve "CVE-Detailbericht (HTML)" "$RAW/oval-report.html" \
     "Hinweis: Fixes aus 'esm-apps/esm-infra' benötigen Ubuntu Pro (kostenlos für bis zu 5 Rechner)"
 }
@@ -582,8 +609,26 @@ mod_firewall() {
     [[ " $RISKY_PORTS_HIGH " == *" $port "* ]] && risk_h+="$port/$proto($prog) "
     [[ " $RISKY_PORTS_MED "  == *" $port "* ]] && risk_m+="$port/$proto($prog) "
   done <"$RAW/ports.txt"
-  [ -n "$risk_h" ] && add HOCH firewall "Riskante Dienste lauschen öffentlich: $risk_h" \
-    "Datenbanken/Admin-Dienste nur an 127.0.0.1 binden oder per Firewall auf feste IPs beschränken"
+  if [ -n "$risk_h" ]; then
+    # je Dienst ein konkreter Vorschlag
+    local adv=() seen=" " pp
+    for pp in $risk_h; do
+      port=${pp%%/*}; [[ $seen == *" $port "* ]] && continue; seen+="$port "
+      case $port in
+        111) adv+=("111 rpcbind – nur für NFS nötig. Ohne NFS: sudo systemctl disable --now rpcbind rpcbind.socket") ;;
+        21) adv+=("21 FTP – Passwörter gehen unverschlüsselt übers Netz. Nicht genutzt: sudo systemctl disable --now proftpd; sonst SFTP nutzen oder in Webmin → ProFTPD auf TLS umstellen") ;;
+        23) adv+=("23 Telnet – unverschlüsselt, durch SSH ersetzt: sudo apt purge telnetd") ;;
+        3306) adv+=("3306 MySQL/MariaDB – in /etc/mysql/mariadb.conf.d/50-server.cnf: bind-address = 127.0.0.1, dann sudo systemctl restart mariadb") ;;
+        5432) adv+=("5432 PostgreSQL – in postgresql.conf: listen_addresses = 'localhost'") ;;
+        6379) adv+=("6379 Redis – in /etc/redis/redis.conf: bind 127.0.0.1 ::1 und requirepass setzen") ;;
+        11211) adv+=("11211 Memcached – in /etc/memcached.conf: -l 127.0.0.1") ;;
+        139|445) adv+=("$port Samba – nicht ins Internet: per Firewall sperren (sudo ufw deny $port)") ;;
+        2375|2376) adv+=("$port Docker-API – gibt Root-Zugriff! Sofort nur lokal binden oder per Firewall sperren") ;;
+        *) adv+=("$port – nur an 127.0.0.1 binden oder per Firewall auf feste IP-Adressen beschränken (sudo ufw deny $port)") ;;
+      esac
+    done
+    add HOCH firewall "Riskante Dienste lauschen öffentlich: $risk_h" "${adv[@]}"
+  fi
   [ -n "$risk_m" ] && add MITTEL firewall "Admin-/Web-Oberflächen öffentlich erreichbar: $risk_m" \
     "Empfehlung: per Firewall auf eigene IP-Adressen einschränken"
   [ -n "$list" ] && add INFO firewall "Öffentlich lauschende Ports: $list"
