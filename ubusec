@@ -820,6 +820,60 @@ chk_devshm() { # chk_devshm WARNUNG → 0, wenn alle genannten Dateien erklärt 
   return 0
 }
 
+# chkrootkit sucht in Systemprogrammen nach Zeichenketten bekannter Rootkits. Neuere Programmversionen
+# (z. B. die Rust-Coreutils von Ubuntu 25.10/26.04, ein einziges großes Programm für ls, basename, date …)
+# enthalten solche Zeichenketten zufällig – dann meldet chkrootkit „INFECTED“. Entscheidend ist, ob die Datei
+# byte-gleich mit der aus dem offiziellen Paket ist. Dafür lädt ubusec das Paket in der installierten Version
+# frisch von Ubuntu (nicht nur die lokale Prüfsummenliste, die ein Angreifer mit root-Rechten ändern könnte).
+declare -A INF_OK=() INF_BAD=() INF_LOCAL=() DEB_DIR=(); DEB_OUT=""
+deb_extract() { # deb_extract PAKET → DEB_OUT = Ordner mit dem entpackten Originalpaket (leer bei Fehler)
+  local pkg=$1 ver d
+  [ -n "${DEB_DIR[$pkg]+x}" ] && { DEB_OUT=${DEB_DIR[$pkg]}; return; }
+  ver=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null)
+  d=$(mktemp -d "$STATE_DIR/work/deb.XXXXXX"); chmod 755 "$d"
+  if [ -n "$ver" ] && (cd "$d" && timeout 120 apt-get download -q "$pkg=$ver" >/dev/null 2>&1) \
+     && dpkg-deb -x "$d"/*.deb "$d/x" 2>/dev/null; then DEB_DIR[$pkg]=$d/x
+  else rm -rf "$d"; DEB_DIR[$pkg]=""; fi
+  DEB_OUT=${DEB_DIR[$pkg]}
+}
+chk_infected_binary() { # chk_infected_binary ZEILE → 0, wenn behandelt (Ergebnis wird gesammelt)
+  local line=$1 name bin real pkg dir f orig
+  name=$(sed -n "s/.*Checking \`\\([^']*\\)'.*/\\1/p" <<<"$line")
+  [[ $name =~ ^[a-z0-9._+-]+$ ]] || return 1
+  for f in "/usr/bin/$name" "/bin/$name" "/usr/sbin/$name" "/sbin/$name"; do [ -e "$f" ] && { bin=$f; break; }; done
+  [ -n "$bin" ] || return 1
+  real=$(readlink -f "$bin")
+  pkg=$(dpkg -S "$real" 2>/dev/null | head -1 | cut -d: -f1)
+  [ -n "$pkg" ] || pkg=$(dpkg -S "$bin" 2>/dev/null | head -1 | cut -d: -f1)
+  [ -n "$pkg" ] || return 1
+  deb_extract "$pkg"; dir=$DEB_OUT
+  orig=""
+  if [ -n "$dir" ]; then for f in "$dir$real" "$dir$bin" "$dir/usr${bin#/usr}" "$dir${real#/usr}"; do [ -f "$f" ] && { orig=$f; break; }; done; fi
+  if [ -n "$orig" ]; then
+    if cmp -s "$real" "$orig"; then INF_OK[$pkg]+="$name "; else INF_BAD[$pkg]+="$name($real) "; fi
+  elif ! dpkg --verify "$pkg" 2>/dev/null | grep -q " $real\$"; then INF_LOCAL[$pkg]+="$name "
+  else INF_BAD[$pkg]+="$name($real) "; fi
+  return 0
+}
+report_infected_binaries() {
+  local p
+  for p in "${!INF_BAD[@]}"; do
+    add KRITISCH rootkit "chkrootkit: Programme melden „INFECTED“ und weichen vom Original-Paket ab" \
+      "Paket $p: ${INF_BAD[$p]}" "Notfall-Hinweise befolgen; Vergleich: sudo dpkg --verify $p"
+  done
+  for p in "${!INF_LOCAL[@]}"; do
+    add MITTEL rootkit "chkrootkit meldet „INFECTED“ – vermutlich Fehlalarm, Originalpaket nicht ladbar" \
+      "Paket $p: ${INF_LOCAL[$p]}" "Laut lokaler Paketprüfsumme unverändert; der Abgleich mit dem Originalpaket von Ubuntu war nicht möglich (keine Verbindung?)"
+  done
+  for p in "${!INF_OK[@]}"; do
+    add INFO rootkit "chkrootkit: „INFECTED“-Meldungen sind Fehlalarme – Programme identisch mit dem Originalpaket" \
+      "Paket $p ($(dpkg-query -W -f='${Version}' "$p" 2>/dev/null)): ${INF_OK[$p]}" \
+      "Byte-genau verglichen mit dem frisch von Ubuntu geladenen Paket. chkrootkit erkennt Rootkits an Zeichenketten, die in neueren Programmversionen zufällig vorkommen."
+  done
+  local d; for d in "${DEB_DIR[@]}"; do [ -n "$d" ] && rm -rf "${d%/x}"; done
+  return 0
+}
+
 mod_rootkit() {
   # --- rkhunter --------------------------------------------------------------
   if need rkhunter rootkit rkhunter; then
@@ -866,8 +920,10 @@ mod_rootkit() {
     chkrootkit -q >"$RAW/chkrootkit.txt" 2>&1
     grep -i 'INFECTED' "$RAW/chkrootkit.txt" >"$RAW/chkrootkit-inf.txt"
     while IFS= read -r w; do
-      if [[ $w == *bindshell* ]]; then chk_bindshell "$w"; else add KRITISCH rootkit "chkrootkit: $w"; fi
+      if [[ $w == *bindshell* ]]; then chk_bindshell "$w"
+      elif ! chk_infected_binary "$w"; then add KRITISCH rootkit "chkrootkit: $w"; fi
     done <"$RAW/chkrootkit-inf.txt"
+    report_infected_binaries
     # Rauschen entfernen: Netlink-Meldungen, Dokumentations-/Platzhalterdateien von Paketen
     grep -viE 'INFECTED|^\s*$|not (found|tested|infected)|nothing (found|detected)|^RTNETLINK answers' "$RAW/chkrootkit.txt" \
       | grep -vE '^/usr/(lib|share)/.*/\.(document|gitignore|gitkeep|keep|packlist|placeholder|travis\.yml|rspec|yardopts|npmignore|eslintrc[a-z.]*|editorconfig|build-id)$' \

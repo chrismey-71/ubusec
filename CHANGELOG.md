@@ -4,6 +4,10 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.4.4 – 2026-11-02
 
+- **chkrootkit „INFECTED“ bei Systemprogrammen** (z. B. basename, date, ls – häufig mit den Rust-Coreutils von Ubuntu
+  25.10/26.04): ubusec lädt das Paket in der installierten Version frisch von Ubuntu und vergleicht die Programme
+  byte-genau. Identisch → als Fehlalarm erkannt (INFO); abweichend → KRITISCH; ohne Verbindung → Abgleich mit der
+  lokalen Paketprüfsumme (MITTEL).
 - **Empfehlungen nach Aufwand:** Jeder Punkt zeigt seinen Aufwand; die Liste lässt sich „schnell erledigt zuerst“
   ordnen und nach Aufwand filtern (bis 5 Min, bis 30 Min, länger, erst prüfen). Die Auswahl wird gemerkt.
 - **Ohne Ubuntu Pro:** Neuer Befund listet die Pakete, die Sicherheitskorrekturen nur über Ubuntu Pro (ESM) erhalten,
