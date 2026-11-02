@@ -2032,6 +2032,14 @@ do_install_web() {
     chown -R root:root "$WEB_DIR"; find "$WEB_DIR" -type d -exec chmod 755 {} +; find "$WEB_DIR" -type f -exec chmod 644 {} +
   fi
   [ -f "$WEB_DIR/ubusec_web.py" ] || die "Web-Dateien fehlen (Ordner 'web' neben dem Skript)."
+  # Der Dienstbenutzer muss die Programmdateien lesen können – auch wenn ein übergeordneter Ordner
+  # (etwa durch eine Härtung mit umask 027/077) nicht für alle zugänglich ist
+  chmod 755 /usr/local/lib/ubusec 2>/dev/null
+  if ! runuser -u "$WEB_GROUP" -- test -r "$WEB_DIR/ubusec_web.py" 2>/dev/null; then
+    echo "  Warnung: Der Benutzer $WEB_GROUP kann $WEB_DIR/ubusec_web.py nicht lesen. Berechtigungen der Ordner:"
+    namei -l "$WEB_DIR/ubusec_web.py" 2>/dev/null | sed 's/^/    /'
+    echo "  Jeder Ordner auf dem Weg braucht mindestens r-x für „andere“ (z. B. sudo chmod o+rx /usr/local/lib)."
+  fi
   echo "$UBUSEC_VERSION" >"$WEB_DIR/VERSION"; chmod 644 "$WEB_DIR/VERSION"
   ensure_dirs
   if [ ! -f "$CONF_DIR/web.conf" ]; then
