@@ -52,6 +52,7 @@ WPSCAN_API_TOKEN=""
 UBUSEC_REPO="chrismey-71/ubusec"   # GitHub-Repository für den Versionshinweis
 UPDATE_CHECK=1               # bei GitHub nach neuen ubusec-Versionen fragen
 CLAM_PARALLEL=0              # 0 = automatisch, sonst Anzahl paralleler Prüfungen
+LYNIS_TIMEOUT=45m            # Höchstdauer des Lynis-Audits
 CLAM_ENGINE=auto             # auto = laufenden ClamAV-Dienst (clamd) mitbenutzen; clamscan = immer eigene Prozesse
 CLAM_EXCLUDE_DB=1            # Datenbankdateien (MySQL/MariaDB, PostgreSQL …)
 CLAM_EXCLUDE_BACKUPS=1       # Backup-Ordner (/backup, ~/backups …)
@@ -328,9 +329,20 @@ PY
 mod_config() {
   # --- Lynis ---------------------------------------------------------------
   if need lynis config lynis; then
-    lynis audit system --cronjob --no-colors --quiet \
+    # Eigenes Lynis-Profil: CRYP-7902 sucht Zertifikatsdateien mit find -L und folgt dabei symbolischen Links –
+    # auf Virtualmin-Servern bis in große Web- und Datenordner (dauert dann Stunden). Die Zertifikate der
+    # Domains prüft ubusec im Bereich „Websites & Domains“ selbst.
+    # Eintrag in custom.prf (von Lynis zusätzlich zu default.prf gelesen; gilt auch für eigene Lynis-Aufrufe)
+    local pdir
+    for pdir in /etc/lynis /usr/local/etc/lynis ""; do [ -f "$pdir/default.prf" ] && break; done
+    if [ -n "$pdir" ] && ! grep -qix 'skip-test=CRYP-7902' "$pdir/custom.prf" 2>/dev/null; then
+      printf '\n# von ubusec ergänzt: Zertifikatssuche folgt Links bis in große Datenordner; Zertifikate prüft ubusec selbst\nskip-test=CRYP-7902\n' \
+        >>"$pdir/custom.prf"
+      chmod 644 "$pdir/custom.prf"
+    fi
+    timeout --kill-after=60 "${LYNIS_TIMEOUT:-45m}" lynis audit system --cronjob --no-colors --quiet \
       --report-file "$RAW/lynis-report.dat" --logfile "$RAW/lynis.log" >"$RAW/lynis.out" 2>&1 &
-    local lpid=$! ltest
+    local lpid=$! ltest lrc=0
     # Fortschritt für die Weboberfläche: aktuellen Lynis-Test aus dem Protokoll zeigen
     SUB_START=$(date +%s)
     while kill -0 "$lpid" 2>/dev/null; do
@@ -338,8 +350,13 @@ mod_config() {
       if [ -n "$ltest" ] && [ "$ltest" != "$SUB_TEXT" ]; then SUB_TEXT=$ltest; write_status true "$CUR_MOD" "$MOD_I" "$MOD_N"; fi
       sleep 5
     done
-    wait "$lpid" 2>/dev/null
+    wait "$lpid" 2>/dev/null || lrc=$?
     SUB_TEXT=""
+    if (( lrc == 124 || lrc == 137 )); then
+      add MITTEL config "Lynis-Audit nach ${LYNIS_TIMEOUT:-45m} abgebrochen – Ergebnis unvollständig" \
+        "Hängen geblieben bei: ${ltest:-unbekannt}" "Protokoll: $RAW/lynis.log" \
+        "Einzelne Tests lassen sich in /etc/lynis/custom.prf mit skip-test=TEST-ID überspringen"
+    fi
     # auch an den Standardort legen, damit „lynis show details TEST-ID“ funktioniert
     [ -s "$RAW/lynis.log" ] && install -m 0640 "$RAW/lynis.log" /var/log/lynis.log
     [ -s "$RAW/lynis-report.dat" ] && install -m 0640 "$RAW/lynis-report.dat" /var/log/lynis-report.dat

@@ -4,6 +4,11 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- Lynis-Test CRYP-7902 (Ablauf von Zertifikatsdateien) wird übersprungen (Eintrag in /etc/lynis/custom.prf): Er folgt
+  symbolischen Links und durchsuchte auf Virtualmin-Servern stundenlang Web- und Datenordner. Die Zertifikate der
+  Domains prüft ubusec im Bereich „Websites & Domains“.
+- Lynis-Audit mit Zeitlimit (Standard 45 Minuten, LYNIS_TIMEOUT in ubusec.conf); bei Überschreitung wird der
+  hängende Test gemeldet und der Scan läuft weiter.
 - Fortschrittsanzeige zeigt während des Lynis-Audits den gerade laufenden Test (z. B. „Lynis-Test FILE-6310: …“),
   damit sichtbar ist, dass der Scan arbeitet.
 - Behoben: Auf neueren Ubuntu-Versionen (z. B. 26.04) legte die Installation /usr/local/lib/ubusec nur für root
