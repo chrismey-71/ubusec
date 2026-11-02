@@ -725,6 +725,36 @@ code_verify() { # code_verify LISTE – entfernt geprüfte Collabora-Prozesse au
   return 0
 }
 
+# rkhunter meldet jede unbekannte Datei unter /dev/shm. Viele Dienste legen dort gemeinsamen Speicher an
+# (Apache/APR: ShM.<hash>, PostgreSQL, PHP-FPM, Collabora …). Harmlos ist eine solche Datei nur, wenn sie
+# keine Programmdatei ist und ausschließlich von bekannten Diensten in den Speicher eingeblendet wird.
+SHM_OK_RX='^(apache2|httpd|nginx|postgres|php-fpm[0-9.]*|mysqld|mariadbd|coolwsd|kit_[a-z0-9_]+|forkit|coolforkit[a-z-]*|dovecot|redis-server|memcached)$'
+chk_devshm() { # chk_devshm WARNUNG → 0, wenn alle genannten Dateien erklärt sind (dann als INFO gemeldet)
+  local w=$1 f users ok=() bad=() stale=0
+  local files; files=$(grep -oE '/dev/shm/[^ :]+' <<<"$w" | sort -u)
+  [ -n "$files" ] || return 1
+  grep -vqE '^/dev/shm/' <<<"$(grep -oE '/dev/[^ :]+' <<<"$w" | sort -u)" && return 1   # auch Dateien außerhalb von /dev/shm
+  while IFS= read -r f; do
+    [ -e "$f" ] || { ok+=("$f: inzwischen verschwunden"); continue; }
+    if [ "$(head -c4 "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = 7f454c46 ] || [ -x "$f" ]; then
+      bad+=("$f: Programmdatei oder ausführbar"); continue
+    fi
+    users=$(grep -lsF -- "$f" /proc/[0-9]*/maps 2>/dev/null | cut -d/ -f3 | while read -r p; do cat "/proc/$p/comm" 2>/dev/null; done | sort -u | paste -sd, -)
+    if [ -z "$users" ]; then ok+=("$f: von keinem Prozess genutzt ($(stat -c %U "$f"), $(stat -c %y "$f" | cut -d. -f1)) – meist Überbleibsel eines beendeten Dienstes"); stale=1
+    elif tr ',' '\n' <<<"$users" | grep -qvE "$SHM_OK_RX"; then bad+=("$f: genutzt von $users")
+    else ok+=("$f: gemeinsamer Speicher von $users"); fi
+  done <<<"$files"
+  (( ${#bad[@]} == 0 )) || { add HOCH rootkit "rkhunter: $w" "${bad[@]}" "${ok[@]}"; return 0; }
+  if (( stale )); then
+    add NIEDRIG rootkit "rkhunter: Datei(en) in /dev/shm ohne zugehörigen Prozess" "${ok[@]}" \
+      "Keine Programmdatei; verschwindet beim Neustart. Unbekannt? Inhalt ansehen: sudo strings DATEI | head"
+    return 0
+  fi
+  add INFO rootkit "rkhunter: Dateien in /dev/shm sind gemeinsamer Speicher bekannter Dienste (Fehlalarm)" "${ok[@]}" \
+    "Meldung bei rkhunter abstellen: in /etc/rkhunter.conf.local z. B. ALLOWDEVFILE=/dev/shm/ShM.* eintragen"
+  return 0
+}
+
 mod_rootkit() {
   # --- rkhunter --------------------------------------------------------------
   if need rkhunter rootkit rkhunter; then
@@ -741,6 +771,7 @@ mod_rootkit() {
       END { if (w) print w }' "$RAW/rkhunter.log" 2>/dev/null >"$RAW/rkhunter-warnings.txt"
     local w sev
     while IFS= read -r w; do
+      if [[ $w == "Suspicious file types found in /dev"* ]] && chk_devshm "$w"; then continue; fi
       sev=HOCH; [[ $w =~ [Rr]ootkit|[Bb]ackdoor|[Tt]rojan ]] && sev=KRITISCH
       add "$sev" rootkit "rkhunter: $w"
     done <"$RAW/rkhunter-warnings.txt"
