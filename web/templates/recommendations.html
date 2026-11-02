@@ -9,6 +9,16 @@
   <a href="{{ url_for('recommendations_export', fmt='html') }}">Zum Lesen und Drucken (HTML)</a>
   <a href="{{ url_for('recommendations_export', fmt='csv') }}">Als Tabelle zum Abhaken (CSV)</a>
   <a href="{{ url_for('recommendations_export', fmt='md') }}">Als Text (Markdown)</a></p>
+<details class="hint-box ai-export">
+  <summary>Für eine KI aufbereiten (anonymisiert)</summary>
+  <p>Eine Fassung zum Einfügen in ChatGPT, Claude &amp; Co.: Domains, Systembenutzer, öffentliche IP-Adressen, E-Mail-Adressen,
+    Prüfsummen und Dateinamen aus Nextcloud-Ablagen werden durch Platzhalter wie <code>domain-1.example</code> oder
+    <code>benutzer-2</code> ersetzt. Am Anfang steht ein Arbeitsauftrag für die KI.</p>
+  <p class="export-line"><a href="{{ url_for('recommendations_export', fmt='ki') }}">KI-Fassung herunterladen</a>
+    <a href="{{ url_for('recommendations_export', fmt='ki-zuordnung') }}">Zuordnung der Platzhalter (nur für dich)</a></p>
+  <p class="muted small">Bitte vor dem Einfügen kurz durchlesen: Die Ersetzung ist automatisch und erkennt nicht jede Angabe
+    (z. B. Namen in eigenen Dateipfaden). Die Zuordnungsliste nicht an die KI weitergeben.</p>
+</details>
 {% endif %}
 
 {% if not todo %}

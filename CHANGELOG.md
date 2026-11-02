@@ -2,6 +2,33 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.4.4 – 2026-11-02
+
+- **KI-Fassung der Empfehlungen:** Neuer Download auf der Seite „Empfehlungen“ zum Einfügen in eine KI – mit
+  Arbeitsauftrag; eigene Domains, Systembenutzer, öffentliche IP-Adressen, E-Mail-Adressen, Prüfsummen und Dateinamen
+  aus Nextcloud-Ablagen werden durch Platzhalter ersetzt. Dazu eine Zuordnungsliste nur für dich.
+- Weniger Doppelungen und Fehlalarme (nach Auswertung eines echten Virtualmin-Servers):
+  - rkhunter: Meldungen werden nicht mehr mit der folgenden Prüfzeile vermischt; versteckte Dateien erscheinen als
+    ein Befund statt einzeln; etckeeper (/etc/.git …) und /etc/.updated gelten als harmlos; die SSH-Abweichung
+    PermitRootLogin ist nur noch ein Hinweis (der SSH-Befund selbst bleibt); übliche Warnungen sind MITTEL statt HOCH.
+  - chkrootkit: „RTNETLINK answers“ und Dokumentationsdateien von Paketen (z. B. Ruby-.document) werden ignoriert.
+  - Lynis: Vorschläge mit Detail (welche SSH-Option), ohne Doppelte, ohne SSH-Optionen, die ubusec selbst prüft,
+    ohne Tests, die schon als Warnung erscheinen; auf virtuellen Servern ohne GRUB-Passwort, Partitionen und USB.
+  - Collabora: Systemvorlage in /tmp/coolwsd.*/systemplate wird byte-genau mit den Systemdateien verglichen;
+    /tmp/.webmin und das Symbol des geprüften AppImage gelten nicht mehr als verdächtig.
+  - Autostart-Prüfung ignoriert Kommentarzeilen (z. B. LD_PRELOAD-Beispiel in mariadb.service).
+  - PHP in Upload-Ordnern: Nextcloud-Datenordner werden nicht mehr durchsucht, leere Platzhalter
+    („Silence is golden“) zählen nicht.
+  - Archive in Plugin-/App-Ordnern (z. B. Nextcloud recognize) nur noch NIEDRIG; Roundcube-SQL-Schemas ignoriert.
+  - Apache-Statusseite: „Require local“ wird erkannt – ubusec prüft vom Server selbst aus, deshalb war sie
+    fälschlich als öffentlich gemeldet.
+  - DNS: Hostnamen-Domains von Server-Anbietern (z. B. netcup ultrasrv.de) werden nicht geprüft; fehlendes CAA
+    wird je Domain einmal gemeldet statt für jede Subdomain.
+  - CVE: Die OVAL-Bestandsprüfung („Check that Ubuntu … is installed“) ist keine Sicherheitsmeldung mehr; veraltete
+    CVE-Daten werden nicht gemeldet, wenn der CVE-Bereich sie im selben Scan ohnehin neu lädt.
+  - Datei-Integrität: Datendateien von rkhunter (rkhunter --update) zählen nicht als Veränderung.
+  - Neue bzw. passendere Hinweise: rpcbind/FTP bei öffentlichen Ports, BIND-Version, SMTP-Banner, Content-Security-Policy.
+
 ## 1.4.3 – 2026-11-02
 
 - **Empfehlungen herunterladen:** Auf der Seite „Empfehlungen“ lassen sich alle offenen Punkte samt Begründung und

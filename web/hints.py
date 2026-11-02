@@ -82,6 +82,17 @@ _H = [
                "$ curl -I https://security-metadata.canonical.com/oval/"], effort="15 Min")),
 
     # -------------------------------------------------------------- config ---
+    (r"^config\|Lynis-Warnung: Found BIND version", dict(
+        why="Der DNS-Server BIND verrät auf Anfrage seine genaue Version. Das hilft Angreifern, passende Lücken zu finden.",
+        steps=["In /etc/bind/named.conf.options im Abschnitt options { … } ergänzen: version \"none\";",
+               "$ sudo named-checkconf && sudo systemctl reload named",
+               "Braucht der Server keinen eigenen DNS-Dienst (Domains liegen beim Provider), BIND ganz abschalten: "
+               "sudo systemctl disable --now named"], effort="5 Min")),
+    (r"^config\|Lynis-Warnung: Found some information disclosure in SMTP banner", dict(
+        why="Der Mailserver nennt bei jeder Verbindung Betriebssystem bzw. Software (z. B. „Postfix (Ubuntu)“).",
+        steps=["$ sudo postconf -e 'smtpd_banner = $myhostname ESMTP'",
+               "$ sudo postconf -e 'disable_vrfy_command = yes'",
+               "$ sudo systemctl reload postfix"], effort="5 Min")),
     (r"^config\|Lynis-Warnung", dict(
         why="Lynis stuft diesen Punkt als Warnung ein, also als konkretes Sicherheitsproblem, nicht nur als Empfehlung.",
         steps=["Details und Lösungsvorschlag anzeigen:", "$ sudo lynis show details <TEST-ID>"], effort="prüfen")),
@@ -226,10 +237,13 @@ _H = [
         why="Über IPv6 sind alle Dienste ungefiltert erreichbar.",
         steps=["In /etc/default/ufw: IPV6=yes", "$ sudo ufw disable && sudo ufw enable"], effort="5 Min")),
     (r"^firewall\|Riskante Dienste lauschen öffentlich", dict(
-        why="Datenbanken, Caches und ähnliche Dienste sind nicht dafür gebaut, direkt aus dem Internet erreichbar zu sein. "
-            "Sie werden laufend automatisiert gescannt.",
-        steps=["Dienst nur lokal binden, z. B. MySQL/MariaDB: bind-address = 127.0.0.1",
-               "Redis: bind 127.0.0.1 ::1",
+        why="Diese Dienste sind nicht dafür gebaut, direkt aus dem Internet erreichbar zu sein, und werden laufend "
+            "automatisiert gescannt. Was nicht von außen gebraucht wird, sollte nur lokal lauschen oder abgeschaltet sein.",
+        steps=["rpcbind (111) – nur für NFS nötig. Ohne NFS abschalten: sudo systemctl disable --now rpcbind rpcbind.socket",
+               "FTP (21, proftpd) – überträgt Passwörter unverschlüsselt. Nicht genutzt? sudo systemctl disable --now proftpd. "
+               "Sonst SFTP (über SSH) verwenden oder FTP in Virtualmin auf TLS (FTPS) umstellen.",
+               "MySQL/MariaDB (3306) – in /etc/mysql/mariadb.conf.d/50-server.cnf: bind-address = 127.0.0.1",
+               "Redis (6379) – in /etc/redis/redis.conf: bind 127.0.0.1 ::1",
                "Oder per Firewall sperren: sudo ufw deny <port>"], effort="15 Min")),
     (r"^firewall\|Admin-/Web-Oberflächen öffentlich", dict(
         why="Webmin/Virtualmin-Oberflächen geben bei erfolgreichem Angriff Root-Zugriff. Sie sollten nur von deinen "
@@ -421,7 +435,7 @@ _H = [
         why="Wer die Adresse ohne https:// eintippt, landet auf der unverschlüsselten Seite.",
         steps=["Virtualmin: Domain → Web Configuration → Website Redirects → „Redirect all requests to SSL site“ aktivieren"],
         effort="5 Min")),
-    (r"^sites\|(HSTS|Content-Security-Policy fehlt|X-Content-Type-Options|Schutz vor Einbettung|Referrer-Policy|Permissions-Policy)", dict(
+    (r"^sites\|(HSTS|X-Content-Type-Options|Schutz vor Einbettung|Referrer-Policy|Permissions-Policy)", dict(
         why="Sicherheits-Header weisen den Browser an, sich besser zu schützen: nur HTTPS verwenden (HSTS), Dateitypen nicht "
             "zu erraten (nosniff), die Seite nicht in fremde Seiten einbetten zu lassen (Clickjacking) und weniger über "
             "Besucher preiszugeben. Sie lassen sich für alle Domains auf einmal setzen.",
@@ -702,6 +716,20 @@ _H = [
     (r"^tools\|Neue ubusec-Version", dict(
         why="Eine neue ubusec-Version ist auf GitHub erschienen – mit neuen Prüfungen oder Korrekturen.",
         steps=["Änderungen ansehen: Weboberfläche → Werkzeuge", "$ sudo ubusec --update"], effort="5 Min")),
+
+    (r"^apps\|Archive in Plugin-/App-Ordnern öffentlich abrufbar", dict(
+        why="Das Archiv gehört zu einem Plugin oder einer App (z. B. mitgelieferte Programme) und enthält meist keine "
+            "Zugangsdaten. Abrufbar sollte es trotzdem nicht sein – es verrät Versionen und kostet Bandbreite.",
+        steps=["Prüfen, ob das Plugin/die App das Archiv wirklich braucht; bei WordPress-Plugins ist es oft ein Überbleibsel "
+               "der Installation und kann gelöscht werden.",
+               "Nextcloud-Apps (z. B. recognize/bin): nicht löschen, die App braucht es. Optional per Webserver sperren."],
+        effort="5 Min")),
+    (r"^rootkit\|rkhunter: [0-9]+ versteckte Dateien", dict(
+        why="Versteckte Dateien in Systemordnern sind ein klassisches Versteck für Schadsoftware – meist aber "
+            "Sicherungskopien von Konfigurationsdateien oder Arbeitsdateien von Programmen.",
+        steps=["Jede Datei ansehen: ls -la <pfad>; sudo head <pfad>",
+               "Erklärbar? In /etc/rkhunter.conf.local freigeben: ALLOWHIDDENFILE=<pfad> bzw. ALLOWHIDDENDIR=<pfad>",
+               "Nicht erklärbar: nicht löschen, sondern Notfall-Hinweise befolgen."], effort="10 Min")),
 
     # ------------------------------------------------------------ allgemein ---
     (r"\|.* nicht installiert – Teilprüfung übersprungen", dict(

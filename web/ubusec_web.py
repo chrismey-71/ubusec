@@ -441,7 +441,8 @@ def export_context(state, todo, lynis):
         h = f.get("hint") or {}
         src = state["sources"].get(f["module"], {})
         items.append({
-            "severity": f["severity"], "module": MOD_TITLE.get(f["module"], f["module"]), "message": f["message"],
+            "severity": f["severity"], "module": MOD_TITLE.get(f["module"], f["module"]), "raw_module": f["module"],
+            "message": f["message"],
             "details": [d for d in f.get("details", []) if not d.startswith("… und ")],
             "why": h.get("why", ""), "effort": h.get("effort", ""),
             "steps": [(st[2:], True) if st.startswith("$ ") else (st, False) for st in h.get("steps", [])],
@@ -531,6 +532,165 @@ def export_html(c):
                  % (len(c["lynis"]), "".join("<li>%s</li>" % e(x) for x in c["lynis"])))
     H.append("</body></html>")
     return "\n".join(H)
+
+
+# ------------------------------------------------------------ KI-Export (anonymisiert) ---
+KEEP_LABELS = {"www", "mail", "webmail", "smtp", "imap", "pop", "autoconfig", "autodiscover", "cloud", "nextcloud",
+               "admin", "ftp", "shop", "blog", "api", "dev", "test", "demo", "staging", "office", "collabora"}
+PUBLIC_IP = re.compile(r"(?<![\w.:-])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\w.-]*\d)")
+IPV6 = re.compile(r"(?<![\w:])(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{1,4}(?![\w:])")
+LONGHEX = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{20,}(?![0-9a-fA-F])")
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}")
+URLHOST = re.compile(r"https?://([A-Za-z0-9.-]+)")
+HOSTLINE = re.compile(r"^([a-z0-9-]+(?:\.[a-z0-9-]+)*\.([a-z]{2,24}))(?:$|\s|:|\s–)", re.I)
+FILE_EXT = {"php", "ini", "conf", "cnf", "log", "sql", "txt", "lock", "json", "js", "css", "html", "htm", "xml", "py", "sh",
+            "gz", "zip", "tar", "bak", "old", "orig", "pem", "key", "crt", "dat", "md", "so", "service", "timer", "options"}
+
+
+class Anonymizer:
+    """Ersetzt eigene Domains, Benutzer, öffentliche IPs, E-Mail-Adressen und Prüfsummen durch Platzhalter."""
+
+    def __init__(self, items, host):
+        self.map = {}          # Original → Platzhalter (für die Zuordnungsliste)
+        self.n = {"domain": 0, "benutzer": 0, "ip": 0, "postfach": 0}
+        hosts = set()
+        if host:
+            hosts.add(host.lower())
+        for i in items:
+            for t in [i["message"]] + i["details"]:
+                hosts.update(h.lower() for h in URLHOST.findall(t))
+                m = HOSTLINE.match(t.strip())
+                if m and i.get("raw_module") in ("sites", "apps") and m.group(2).lower() not in FILE_EXT:
+                    hosts.add(m.group(1).lower())
+        hosts = {h.strip(".") for h in hosts if "." in h and not re.fullmatch(r"[\d.]+", h)}
+        self.apexes = {}
+        for h in sorted(hosts, key=lambda x: (x.count("."), x)):
+            parts = h.split(".")
+            apex = ".".join(parts[-3:]) if len(parts) > 2 and parts[-2] in ("co", "com", "or", "ac", "gv") else ".".join(parts[-2:])
+            if apex not in self.apexes:
+                self.n["domain"] += 1
+                self.apexes[apex] = "domain-%d.example" % self.n["domain"]
+                self.map[apex] = self.apexes[apex]
+        # Rechner-Benutzer (Virtualmin: ein Benutzer je Kunde/Domain) – aus /etc/passwd und /home
+        users = set()
+        try:
+            for line in open("/etc/passwd", encoding="utf-8", errors="replace"):
+                f = line.split(":")
+                if len(f) > 3 and f[2].isdigit() and 1000 <= int(f[2]) < 65534:
+                    users.add(f[0])
+        except OSError:
+            pass
+        users.update(d for d in os.listdir("/home") if os.path.isdir(os.path.join("/home", d))) if os.path.isdir("/home") else None
+        self.users = {}                     # Platzhalter werden erst bei Verwendung vergeben
+        users = sorted((u for u in users if len(u) >= 3), key=len, reverse=True)
+        self.ips = {}
+        self.mails = {}
+        self.labels = {}
+        if self.apexes:
+            alt = "|".join(re.escape(a) for a in sorted(self.apexes, key=len, reverse=True))
+            self.dom_rx = re.compile(r"(?<![\w-])((?:[a-z0-9-]+\.)*)(%s)(?![\w-])" % alt, re.I)
+        else:
+            self.dom_rx = None
+        if users:
+            alt = "|".join(re.escape(u) for u in users)
+            self.user_rx = re.compile(r"(?<![\w.-])(%s)(?![\w-])" % alt)
+        else:
+            self.user_rx = None
+
+    def _dom(self, m):
+        subs = [x.lower() for x in m.group(1).rstrip(".").split(".") if x]
+        keep = []
+        for x in subs:
+            if x in KEEP_LABELS:
+                keep.append(x)
+            else:
+                if x not in self.labels:
+                    self.labels[x] = "sub%d" % (len(self.labels) + 1)
+                    self.map[x + ".…"] = self.labels[x] + ".…"
+                keep.append(self.labels[x])
+        return ".".join(keep + [self.apexes[m.group(2).lower()]])
+
+    def _user(self, m):
+        u = m.group(1)
+        if u not in self.users:
+            self.n["benutzer"] += 1
+            self.users[u] = "benutzer-%d" % self.n["benutzer"]
+            self.map[u] = self.users[u]
+        return self.users[u]
+
+    def _ip(self, m):
+        before = m.string[max(0, m.start() - 12):m.start()].lower()
+        if re.search(r"(→|->|version|\bv)\s*$", before):   # Versionsnummern wie „6.1.6 → 6.2.4.1“
+            return m.group(0)
+        a = [int(x) for x in m.groups()]
+        if any(x > 255 for x in a) or a[0] in (0, 10, 127) or (a[0] == 192 and a[1] == 168) or (a[0] == 172 and 16 <= a[1] < 32):
+            return m.group(0)
+        ip = m.group(0)
+        if ip not in self.ips:
+            self.n["ip"] += 1
+            self.ips[ip] = "IP-%d" % self.n["ip"]
+            self.map[ip] = self.ips[ip]
+        return self.ips[ip]
+
+    def _mail(self, m):
+        addr = m.group(0)
+        if addr not in self.mails:
+            self.n["postfach"] += 1
+            dom = addr.split("@", 1)[1]
+            self.mails[addr] = "postfach-%d@%s" % (self.n["postfach"], self.dom_rx.sub(self._dom, dom) if self.dom_rx else "domain.example")
+            self.map[addr] = self.mails[addr]
+        return self.mails[addr]
+
+    def __call__(self, t):
+        t = EMAIL.sub(self._mail, t)
+        # private Dateinamen in Nextcloud-Datenordnern und Benutzerablagen nicht weitergeben
+        t = re.sub(r"(/data/)[^/\s]+(/files/)\S.*", r"\1<nextcloud-benutzer>\2…", t)
+        if self.dom_rx:
+            t = self.dom_rx.sub(self._dom, t)
+        if self.user_rx:
+            t = self.user_rx.sub(self._user, t)
+        t = PUBLIC_IP.sub(self._ip, t)
+        t = IPV6.sub("IPv6-Adresse", t)
+        t = LONGHEX.sub("<prüfsumme>", t)
+        return t
+
+
+def export_ai(c, os_name=""):
+    """Markdown für eine KI: anonymisiert, kompakt, mit Arbeitsauftrag."""
+    an = Anonymizer(c["items"], c["host"])
+    L = ["# Sicherheitsbefunde eines Linux-Servers – bitte bei der Behebung helfen", "",
+         "## Kontext", "",
+         "- Server: %s mit Virtualmin/Webmin (Apache, PHP-FPM, Postfix, Dovecot, MariaDB), Webanwendungen u. a. "
+         "WordPress, Nextcloud und Roundcube" % (os_name or "Ubuntu"),
+         "- Die Befunde stammen aus ubusec (fasst Lynis, rkhunter, chkrootkit, ClamAV, OpenSCAP und eigene Prüfungen zusammen).",
+         "- Anonymisiert: Domains heißen domain-N.example (Subdomains subN), Systembenutzer benutzer-N, öffentliche "
+         "IP-Adressen IP-N, Postfächer postfach-N@…, Prüfsummen <prüfsumme>. Bitte diese Platzhalter in Befehlen beibehalten.",
+         "",
+         "## Bitte",
+         "",
+         "1. Ordne die Punkte nach tatsächlichem Risiko für diesen Server und nenne mögliche Fehlalarme.",
+         "2. Fasse zusammengehörige Punkte zusammen.",
+         "3. Gib für jeden Punkt konkrete Schritte für Ubuntu/Virtualmin an – mit Befehlen und dem Hinweis, wie man die "
+         "Änderung prüft und rückgängig macht.",
+         "4. Warne ausdrücklich, wenn eine Änderung den Zugang zum Server (SSH, Webmin) oder Websites unterbrechen kann.",
+         "",
+         "## Befunde (%s)" % ", ".join("%d %s" % (c["counts"].get(s, 0), SEV_NAME[s]) for s in SEVERITIES if s != "INFO"), ""]
+    n = 0
+    for s in SEVERITIES[:-1]:
+        for i in (x for x in c["items"] if x["severity"] == s):
+            n += 1
+            L.append("### %d. [%s] %s" % (n, SEV_NAME[s], an(i["message"])))
+            L.append("Bereich: %s" % i["module"])
+            det = list(dict.fromkeys(an(d) for d in i["details"][:8]))
+            L += ["- " + d for d in det]
+            if len(i["details"]) > 8:
+                L.append("- … und %d weitere gleichartige Einträge" % (len(i["details"]) - 8))
+            if i["steps"]:
+                L.append("Vorschlag von ubusec: " + " | ".join(an(t) for t, _ in i["steps"]))
+            L.append("")
+    if c["lynis"]:
+        L += ["## Härtungsvorschläge von Lynis", ""] + ["- " + an(x) for x in c["lynis"]] + [""]
+    return "\n".join(L), an.map
 
 
 def lynis_suggestions(state):
@@ -908,15 +1068,27 @@ def create_app():
 
     @app.route("/empfehlungen/export.<fmt>")
     def recommendations_export(fmt):
-        if fmt not in ("md", "csv", "html"):
+        if fmt not in ("md", "csv", "html", "ki", "ki-zuordnung"):
             abort(404)
         state = current_state(all_reports(60))
         todo = [f for f in state["findings"] if f["severity"] != "INFO"]
         c = export_context(state, todo, lynis_suggestions(state))
+        stamp = datetime.now().strftime("%Y%m%d")
+        if fmt in ("ki", "ki-zuordnung"):
+            os_name = next((r.get("os") for r in state["sources"].values() if r.get("os")), "")
+            body, mapping = export_ai(c, ("Ubuntu " + os_name) if os_name and not os_name.lower().startswith("ubuntu") else os_name)
+            if fmt == "ki-zuordnung":
+                body = "ubusec – Zuordnung der Platzhalter im KI-Export vom %s\nNur für dich – nicht an die KI weitergeben.\n\n" % c["created"] \
+                    + "\n".join("%-28s %s" % (v, k) for k, v in sorted(mapping.items(), key=lambda kv: kv[1])) + "\n"
+                mime, name = "text/plain", "ubusec-ki-zuordnung-%s.txt" % stamp
+            else:
+                mime, name = "text/markdown", "ubusec-fuer-ki-%s.md" % stamp   # ohne Servernamen im Dateinamen
+            resp = Response(body, mimetype=mime + "; charset=utf-8")
+            resp.headers["Content-Disposition"] = 'attachment; filename="%s"' % name
+            return resp
         body = {"md": export_markdown, "csv": export_csv, "html": export_html}[fmt](c)
         mime = {"md": "text/markdown", "csv": "text/csv", "html": "text/html"}[fmt]
-        name = "ubusec-empfehlungen-%s-%s.%s" % (re.sub(r"[^A-Za-z0-9.-]", "_", c["host"] or "server"),
-                                                 datetime.now().strftime("%Y%m%d"), fmt)
+        name = "ubusec-empfehlungen-%s-%s.%s" % (re.sub(r"[^A-Za-z0-9.-]", "_", c["host"] or "server"), stamp, fmt)
         resp = Response(body, mimetype=mime + "; charset=utf-8")
         resp.headers["Content-Disposition"] = 'attachment; filename="%s"' % name
         return resp

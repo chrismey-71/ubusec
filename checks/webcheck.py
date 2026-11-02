@@ -465,6 +465,10 @@ def check_domain(domain, vh, full):
         if x and x.status == 200 and x.body:
             try:
                 if test(x):
+                    if p in ("/server-status", "/server-info") and apache_location_local_only(p):
+                        # „Require local“ erlaubt auch Anfragen vom Server selbst – ubusec prüft von hier aus
+                        agg("INFO", "Apache-Status-/Infoseite nur lokal freigegeben (Require local) – von außen gesperrt", "https://%s%s" % (domain, p))
+                        continue
                     agg(sev, label, "https://%s%s" % (domain, p))
             except Exception:  # noqa: BLE001
                 pass
@@ -509,6 +513,35 @@ def zone_apex(name):
     return ".".join(parts[-2:])
 
 
+_LOC_CACHE = {}
+
+
+def apache_location_local_only(loc):
+    """True, wenn jede Apache-Freigabe für /server-status bzw. /server-info nur lokal oder für feste IPs gilt."""
+    if loc in _LOC_CACHE:
+        return _LOC_CACHE[loc]
+    files = []
+    for g in ("/etc/apache2/mods-enabled/*.conf", "/etc/apache2/conf-enabled/*.conf", "/etc/apache2/sites-enabled/*",
+              "/etc/apache2/apache2.conf"):
+        files += glob.glob(g)
+    blocks = []
+    for f in files:
+        txt = read(f)
+        for m in re.finditer(r"<Location\s+\"?%s\"?\s*>(.*?)</Location>" % re.escape(loc), txt, re.S | re.I):
+            body = "\n".join(l for l in m.group(1).splitlines() if not l.strip().startswith("#"))
+            blocks.append(body)
+    ok = bool(blocks) and all(re.search(r"Require\s+(local|ip\s|host\s)", b, re.I) and not re.search(r"Require\s+all\s+granted", b, re.I)
+                              for b in blocks)
+    _LOC_CACHE[loc] = ok
+    return ok
+
+
+# Hostnamen-Domains von Server-Anbietern: Deren DNS (SPF, DMARC, CAA) verwaltet der Anbieter, nicht du
+PROVIDER_ZONES = {"ultrasrv.de", "netcup.net", "contaboserver.net", "your-server.de", "vps.ovh.net", "vps.ovh.ca",
+                  "ip-ionos.de", "stratoserver.net", "members.linode.com", "ip.linodeusercontent.com", "vultrusercontent.com",
+                  "hostingersite.com", "1blu.de", "server4you.de", "dogado.net", "hosteurope.de", "kasserver.com"}
+
+
 def check_dns(domains):
     if not shutil_which("dig"):
         add("NIEDRIG", "DNS-/E-Mail-Prüfung übersprungen: dig fehlt", "Installieren: apt install bind9-dnsutils")
@@ -519,6 +552,10 @@ def check_dns(domains):
         a = zone_apex(d)
         apexes.setdefault(a, []).append(d)
     for apex in sorted(apexes):
+        if apex in PROVIDER_ZONES:
+            agg("INFO", "DNS-Prüfung übersprungen für Hostnamen des Server-Anbieters ({domains})",
+                "%s – SPF, DMARC und CAA verwaltet der Anbieter" % ", ".join(apexes[apex]))
+            continue
         mx = dig(apex, "MX")
         txt = dig(apex, "TXT")
         spf = [t for t in txt if t.lower().startswith("v=spf1")]
@@ -547,16 +584,16 @@ def check_dns(domains):
                 agg("MITTEL", "Kein DMARC-Eintrag ({domains})", apex)
             elif pol == "none":
                 agg("NIEDRIG", "DMARC nur im Beobachtungsmodus (p=none) ({domains})", apex)
-        # CAA gilt für die Domain und wird nach oben vererbt
+        # CAA gilt für die Domain und alle Subdomains (Zertifizierungsstellen suchen nach oben) – je Zone einmal melden
+        missing = []
         for d in apexes[apex]:
-            found = False
             parts = d.split(".")
-            for i in range(len(parts) - 1):
-                if dig(".".join(parts[i:]), "CAA"):
-                    found = True
-                    break
-            if not found:
-                agg("NIEDRIG", "Kein CAA-Eintrag (beliebige Zertifizierungsstellen dürfen Zertifikate ausstellen) ({domains})", d)
+            if not any(dig(".".join(parts[i:]), "CAA") for i in range(len(parts) - 1)):
+                missing.append(d)
+        if missing:
+            subs = [d for d in missing if d != apex]
+            agg("NIEDRIG", "Kein CAA-Eintrag (beliebige Zertifizierungsstellen dürfen Zertifikate ausstellen) ({domains})",
+                apex + (" – gilt auch für %d Subdomain%s" % (len(subs), "s" if len(subs) != 1 else "") if subs else ""))
     return info
 
 
@@ -931,6 +968,9 @@ def scan_files(root, vh, known, budget):
             p = os.path.join(dirpath, fn)
             for rx, sev, kind in SENSITIVE:
                 if rx.search(fn):
+                    # Roundcube liefert seine Datenbank-Schemas unter SQL/ mit (per .htaccess gesperrt)
+                    if kind == "db" and "/SQL/" in p and os.path.isfile(os.path.join(p.split("/SQL/")[0], "program/include/iniset.php")):
+                        break
                     if kind == "archive":
                         try:
                             if os.path.getsize(p) < 512 * 1024:
@@ -944,7 +984,11 @@ def scan_files(root, vh, known, budget):
                     if site:
                         x = fetch(site[0], site[1], site[2], method="GET", limit=256)
                         reach = bool(x and x.status == 200 and not is_html(x))
-                    if reach:
+                    if reach and kind == "archive" and re.search(r"/wp-content/(plugins|themes)/[^/]+/|/(apps|custom_apps|apps-extra)/[^/]+/", p):
+                        # Teil eines Plugins/einer App (z. B. mitgelieferte Programme) – keine Sicherung mit Zugangsdaten
+                        agg("NIEDRIG", "Archive in Plugin-/App-Ordnern öffentlich abrufbar (meist mitgeliefert)",
+                            "https://%s%s" % (site[0], site[2]))
+                    elif reach:
                         agg(sev, {"db": "Datenbank-Dumps öffentlich abrufbar", "secret": "Schlüssel- oder Zugangsdateien öffentlich abrufbar",
                                   "backup": "Sicherungskopien öffentlich abrufbar (Quellcode, Zugangsdaten)",
                                   "archive": "Archive/Backups im Webverzeichnis öffentlich abrufbar"}[kind],
@@ -1171,7 +1215,8 @@ def mod_tools(raw, full):
     if r["present"]:
         a = age_days(oval)
         r["data"], r["data_age"] = "CVE-Daten von Canonical", a
-        if a is not None and a > 2:
+        # läuft im selben Scan noch der CVE-Bereich, lädt er die Daten gleich neu – dann nicht als veraltet melden
+        if a is not None and a > 2 and os.environ.get("UBUSEC_CVE_FOLLOWS") != "1":
             r["state"] = "veraltet"
             add("NIEDRIG", "CVE-Daten (Ubuntu OVAL) älter als 2 Tage",
                 "Stand: vor %s Tagen – erreicht der Server security-metadata.canonical.com?" % a)

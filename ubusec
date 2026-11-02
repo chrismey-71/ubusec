@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.4.3"
+UBUSEC_VERSION="1.4.4"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -293,6 +293,8 @@ for d in root.iter():
         continue
     if d.get('result') == 'true' and d.get('definition_id'):
         hits.add(d.get('definition_id'))
+    elif d.get('id') and d.get('class') == 'inventory':
+        defs[d.get('id')] = None   # „Check that Ubuntu … is installed“ – keine Sicherheitsmeldung
     elif d.get('id') and d.get('class'):
         title, sev, cves = '', '', 0
         for x in d.iter():
@@ -302,7 +304,9 @@ for d in root.iter():
             elif n == 'cve': cves += 1
         defs[d.get('id')] = (title, sev, cves)
 for h in sorted(hits):
-    t, s, n = defs.get(h, (h, '', 0))
+    if h in defs and defs[h] is None:
+        continue
+    t, s, n = defs.get(h) or (h, '', 0)
     print(f"{s or 'Unknown'}\t{n}\t{t}")
 PY
   local total; total=$(grep -c . "$RAW/cve-hits.tsv")
@@ -366,8 +370,23 @@ mod_config() {
       id=${line%%|*}; txt=${line#*|}; txt=${txt%%|*}
       add MITTEL config "Lynis-Warnung: $txt [$id]" "Details: sudo lynis show details $id"
     done < <(sed -n 's/^warning\[\]=//p' "$RAW/lynis-report.dat" 2>/dev/null)
+    # Vorschläge: mit Detail (z. B. welche SSH-Option), ohne Doppelte, ohne Tests, die schon als Warnung erscheinen;
+    # auf virtuellen Servern ohne Vorschläge, die dort nicht umsetzbar sind (GRUB-Passwort, Partitionen, USB)
+    local virt=0; systemd-detect-virt -q 2>/dev/null && virt=1
+    sed -n 's/^warning\[\]=//p' "$RAW/lynis-report.dat" 2>/dev/null | cut -d'|' -f1 | sort -u >"$RAW/lynis-warn-ids.txt"
     sed -n 's/^suggestion\[\]=//p' "$RAW/lynis-report.dat" 2>/dev/null \
-      | awk -F'|' '{print $2" ["$1"]"}' >"$RAW/lynis-suggestions.txt"
+      | awk -F'|' -v virt=$virt 'BEGIN { while ((getline w < ARGV[2]) > 0) warn[w] = 1; ARGV[2] = "" }
+          { id = $1; sub(/:.*/, "", id)
+            if (id in warn) next
+            if (virt && id ~ /^(BOOT-5122|FILE-6310|USB-1000|USB-2000|USB-3000|STRG-1846|PROC-3614)$/) { hid++; next }
+            t = $2; d = $3
+            # diese SSH-Optionen prüft ubusec selbst (eigene Befunde mit Anleitung)
+            if (id == "SSH-7408" && d ~ /^(PermitRootLogin|PasswordAuthentication|X11Forwarding|MaxAuthTries|KbdInteractiveAuthentication|PermitEmptyPasswords)/) next
+            if (d != "" && d != "-" && index(t, d) == 0) t = t ": " d
+            line = t " [" $1 "]"
+            if (!(line in seen)) { seen[line] = 1; print line } }
+          END { if (hid) print hid > "/dev/stderr" }' - "$RAW/lynis-warn-ids.txt" \
+      >"$RAW/lynis-suggestions.txt" 2>"$RAW/lynis-hidden-count.txt"
     if [ -n "$hi" ]; then
       take "$RAW/lynis-suggestions.txt" 6
       if (( hi < 65 )); then
@@ -579,7 +598,8 @@ mod_integrity() {
   awk '$1 ~ /^..5/ && $2 != "c" {print $NF}' "$RAW/dpkg-verify.txt" >"$RAW/dpkg-changed.txt"
   local binre='^/(usr/)?(local/)?s?bin/|^/(usr/)?lib(32|64|x32)?/.*\.so(\.[0-9.]+)?$|^/(usr/)?lib/systemd/systemd'
   grep -E  "$binre" "$RAW/dpkg-changed.txt" >"$RAW/dpkg-changed-bin.txt"
-  grep -vE "$binre" "$RAW/dpkg-changed.txt" >"$RAW/dpkg-changed-other.txt"
+  # rkhunter aktualisiert seine eigenen Datendateien (rkhunter --update) – keine Auffälligkeit
+  grep -vE "$binre" "$RAW/dpkg-changed.txt" | grep -v '^/var/lib/rkhunter/' >"$RAW/dpkg-changed-other.txt"
   if [ -s "$RAW/dpkg-changed-bin.txt" ]; then take "$RAW/dpkg-changed-bin.txt" 10
     add KRITISCH integrity "$(grep -c . "$RAW/dpkg-changed-bin.txt") Programme/Bibliotheken weichen vom Paket-Original ab" \
       "${ITEMS[@]}" "Prüfen: dpkg -S <datei>; ggf. apt install --reinstall <paket>"
@@ -766,15 +786,34 @@ mod_rootkit() {
     rkhunter --check --sk --nocolors --noappend-log --logfile "$RAW/rkhunter.log" >"$RAW/rkhunter.out" 2>&1
     awk '
       /Warning: / { if (w) print w; sub(/^\[[0-9:]+\] Warning: /,""); w=$0; next }
-      w && /^\[[0-9:]+\]  +[^ ]/ { l=$0; sub(/^\[[0-9:]+\] +/,"",l); if (length(w)<220) w=w" "l; next }
+      w && /^\[[0-9:]+\]  +[^ ]/ && !/\[ [A-Za-z ]+ \][[:space:]]*$/ { l=$0; sub(/^\[[0-9:]+\] +/,"",l); if (length(w)<220) w=w" "l; next }
       { if (w) print w; w="" }
       END { if (w) print w }' "$RAW/rkhunter.log" 2>/dev/null >"$RAW/rkhunter-warnings.txt"
     local w sev
+    local hidden=() hidden_ok=() etck=0 hp
+    dpkg -s etckeeper >/dev/null 2>&1 && etck=1
     while IFS= read -r w; do
       if [[ $w == "Suspicious file types found in /dev"* ]] && chk_devshm "$w"; then continue; fi
-      sev=HOCH; [[ $w =~ [Rr]ootkit|[Bb]ackdoor|[Tt]rojan ]] && sev=KRITISCH
+      if [[ $w =~ ^Hidden\ (file|directory)\ found:\ ([^:]+) ]]; then
+        hp=${BASH_REMATCH[2]}
+        # etckeeper verwaltet /etc mit git; /etc/.updated legt systemd nach Updates an
+        if { (( etck )) && [[ $hp =~ ^/etc/\.(git|etckeeper|gitignore)$ ]]; } || [ "$hp" = /etc/.updated ]; then hidden_ok+=("$hp")
+        else hidden+=("$w"); fi
+        continue
+      fi
+      if [[ $w == "The SSH and rkhunter configuration options should be the same"* ]]; then
+        add INFO rootkit "rkhunter: SSH-Einstellung PermitRootLogin weicht von rkhunter ab – siehe SSH-Befunde unter „Konfiguration“" \
+          "Verschwindet, sobald PermitRootLogin geändert ist (oder ALLOW_SSH_ROOT_USER in /etc/rkhunter.conf.local anpassen)"
+        continue
+      fi
+      sev=MITTEL
+      [[ $w =~ propert(y|ies)\ ha(s|ve)\ changed|replaced\ by\ a\ script|[Dd]eleted\ file|[Pp]romiscuous|[Ss]uspicious\ string ]] && sev=HOCH
+      [[ $w =~ [Rr]ootkit|[Bb]ackdoor|[Tt]rojan ]] && sev=KRITISCH
       add "$sev" rootkit "rkhunter: $w"
     done <"$RAW/rkhunter-warnings.txt"
+    (( ${#hidden[@]} > 0 )) && add MITTEL rootkit "rkhunter: ${#hidden[@]} versteckte Dateien/Ordner in Systemverzeichnissen" "${hidden[@]}" \
+      "Erklärbar (z. B. Backup einer Konfigurationsdatei)? Freigeben in /etc/rkhunter.conf.local: ALLOWHIDDENFILE=/pfad bzw. ALLOWHIDDENDIR=/pfad"
+    (( ${#hidden_ok[@]} > 0 )) && add INFO rootkit "rkhunter: versteckte Dateien von etckeeper/systemd erkannt (harmlos)" "${hidden_ok[@]}"
   fi
 
   # --- chkrootkit ------------------------------------------------------------
@@ -784,7 +823,12 @@ mod_rootkit() {
     while IFS= read -r w; do
       if [[ $w == *bindshell* ]]; then chk_bindshell "$w"; else add KRITISCH rootkit "chkrootkit: $w"; fi
     done <"$RAW/chkrootkit-inf.txt"
-    grep -viE 'INFECTED|^\s*$|not (found|tested|infected)|nothing (found|detected)' "$RAW/chkrootkit.txt" >"$RAW/chkrootkit-other.txt"
+    # Rauschen entfernen: Netlink-Meldungen, Dokumentations-/Platzhalterdateien von Paketen
+    grep -viE 'INFECTED|^\s*$|not (found|tested|infected)|nothing (found|detected)|^RTNETLINK answers' "$RAW/chkrootkit.txt" \
+      | grep -vE '^/usr/(lib|share)/.*/\.(document|gitignore|gitkeep|keep|packlist|placeholder|travis\.yml|rspec|yardopts|npmignore|eslintrc[a-z.]*|editorconfig|build-id)$' \
+      | grep -vE '^/usr/lib/(debug|jvm)/.*/\.build-id' >"$RAW/chkrootkit-other.txt"
+    # nur noch die Überschrift übrig? Dann ist nichts zu melden
+    grep -qvE '^WARNING: The following suspicious files and directories were found:$' "$RAW/chkrootkit-other.txt" || : >"$RAW/chkrootkit-other.txt"
     if [ -s "$RAW/chkrootkit-other.txt" ]; then take "$RAW/chkrootkit-other.txt" 5
       add MITTEL rootkit "chkrootkit meldet Auffälligkeiten (oft harmlos, bitte prüfen)" "${ITEMS[@]}"
     fi
@@ -870,6 +914,21 @@ heuristics() {
     local d; for d in "${!CODE_OK[@]}"; do grep -vF -- "$d/" "$RAW/tmp-elf.txt" >"$RAW/tmp-elf.txt.n"; mv -f "$RAW/tmp-elf.txt.n" "$RAW/tmp-elf.txt"
       grep -vF -- "$d/" "$RAW/tmp-exec.txt" >"$RAW/tmp-exec.txt.n"; mv -f "$RAW/tmp-exec.txt.n" "$RAW/tmp-exec.txt"; done
   fi
+  # Collabora Online legt unter /tmp/coolwsd.*/systemplate eine Kopie von Systembibliotheken für seine
+  # abgeschotteten Dokumentprozesse an. Harmlos, wenn jede Datei byte-gleich mit dem Original im System ist.
+  local sysok=0 l orig
+  for l in tmp-elf tmp-exec; do
+    : >"$RAW/$l.n"
+    while IFS= read -r f; do
+      if [[ $f == /tmp/coolwsd.*/systemplate/* ]]; then
+        orig=/${f#*/systemplate/}
+        if [ -f "$orig" ] && cmp -s -- "$f" "$orig"; then sysok=$((sysok+1)); continue; fi
+      fi
+      echo "$f" >>"$RAW/$l.n"
+    done <"$RAW/$l.txt"
+    mv -f "$RAW/$l.n" "$RAW/$l.txt"
+  done
+  (( sysok > 0 )) && add INFO rootkit "Collabora-Systemvorlage in /tmp/coolwsd.*: $sysok Programmdateien geprüft – identisch mit den Systemdateien"
   if [ -s "$RAW/tmp-elf.txt" ]; then take "$RAW/tmp-elf.txt" 8
     add HOCH rootkit "Programmdateien (ELF) in temporären Verzeichnissen" "${ITEMS[@]}"
   fi
@@ -879,6 +938,11 @@ heuristics() {
   find /tmp /var/tmp /dev/shm -xdev -mindepth 1 -maxdepth 3 -name '.*' \
     ! -name '.X11-unix' ! -name '.ICE-unix' ! -name '.font-unix' ! -name '.XIM-unix' ! -name '.Test-unix' \
     ! -name '.lock' ! -name '.org.chromium.*' ! -name '.s.PGSQL.*' ! -name '.X*-lock' 2>/dev/null >"$RAW/tmp-hidden.txt"
+  # bekannte Fälle: Webmin-Arbeitsordner (root), Symbol im geprüften Collabora-AppImage
+  { [ -d /tmp/.webmin ] && [ "$(stat -c %U /tmp/.webmin)" = root ] && [ -d /etc/webmin ] && echo /tmp/.webmin
+    for d in "${!CODE_OK[@]}"; do echo "$d/.DirIcon"; done; } >"$RAW/tmp-hidden-ok.txt"
+  grep -vxF -f "$RAW/tmp-hidden-ok.txt" "$RAW/tmp-hidden.txt" >"$RAW/tmp-hidden.n" || true
+  mv -f "$RAW/tmp-hidden.n" "$RAW/tmp-hidden.txt"
   if [ -s "$RAW/tmp-hidden.txt" ]; then take "$RAW/tmp-hidden.txt" 8
     add MITTEL rootkit "Versteckte Dateien/Verzeichnisse in temporären Verzeichnissen" "${ITEMS[@]}"
   fi
@@ -887,7 +951,8 @@ heuristics() {
   grep -HnsIE 'curl[^|#]*\|[[:space:]]*(ba|z|da)?sh|wget[^|#]*\|[[:space:]]*(ba|z|da)?sh|base64[[:space:]]+(-d|--decode)|/dev/tcp/|\bnc(at)?\b[^|]*-e[[:space:]]|python[23]?[[:space:]]+-c|/dev/shm/|/tmp/\.|chattr[[:space:]]+\+i|LD_PRELOAD=' \
     /etc/crontab /etc/cron.d/* /etc/cron.hourly/* /etc/cron.daily/* /etc/cron.weekly/* /etc/cron.monthly/* \
     /var/spool/cron/crontabs/* /etc/rc.local /etc/profile /etc/profile.d/* /etc/bash.bashrc \
-    /root/.bashrc /root/.profile /etc/systemd/system/*.service /etc/systemd/system/*/*.service /etc/update-motd.d/* 2>/dev/null | cut -c1-200 >"$RAW/autostart-susp.txt"
+    /root/.bashrc /root/.profile /etc/systemd/system/*.service /etc/systemd/system/*/*.service /etc/update-motd.d/* 2>/dev/null \
+    | awk '{ c = $0; sub(/^[^:]*:[0-9]+:/, "", c); if (c !~ /^[[:space:]]*(#|;)/) print }' | cut -c1-200 >"$RAW/autostart-susp.txt"   # Kommentarzeilen zählen nicht
   if [ -s "$RAW/autostart-susp.txt" ]; then take "$RAW/autostart-susp.txt" 8
     add HOCH rootkit "Verdächtige Befehle in Autostart-Dateien (Cron/systemd/Profile)" "${ITEMS[@]}"
   fi
@@ -1181,15 +1246,30 @@ mod_web() {
   for p in $WEB_PATHS; do [ -d "$p" ] && roots+=("$p"); done
   [ ${#roots[@]} -eq 0 ] && return 0
 
-  find "${roots[@]}" -xdev \( -path '*/wp-content/uploads/*' -o -path '*/images/*' -o -path '*/media/*' -o -path '*/files/*' \) \
-    -type f -iname '*.ph*' ! -name '*.phpx' 2>/dev/null >"$RAW/web-php-uploads.txt"
+  # Nextcloud-Datenordner sind Ablagen der Benutzer (gespeicherte Webseiten, Updater-Sicherungen) und werden vom
+  # Webserver nicht ausgeführt – hier nicht durchsuchen (der Virenscan prüft sie weiterhin)
+  local prune=() d
+  while IFS= read -r d; do [ -n "$d" ] && prune+=(-path "$d" -o); done < <(nextcloud_datadirs)
+  find "${roots[@]}" -xdev \( "${prune[@]}" -false \) -prune -o \
+    \( -path '*/wp-content/uploads/*' -o -path '*/images/*' -o -path '*/media/*' -o -path '*/files/*' \) \
+    -type f -iname '*.ph*' ! -name '*.phpx' -print 2>/dev/null >"$RAW/web-php-uploads.all"
+  # leere Platzhalter „<?php // Silence is golden“ (verhindern Verzeichnislisten) sind harmlos
+  : >"$RAW/web-php-uploads.txt"
+  while IFS= read -r d; do
+    if [ "$(stat -c %s "$d" 2>/dev/null || echo 999)" -lt 200 ] \
+       && ! tr -d '\r' <"$d" | sed -e 's://.*$::' -e 's:#.*$::' | tr -d ' \n\t' | sed -e 's:/\*.*\*/::g' -e 's/^<?php//' -e 's/?>$//' | grep -q .; then
+      continue
+    fi
+    echo "$d" >>"$RAW/web-php-uploads.txt"
+  done <"$RAW/web-php-uploads.all"
   if [ -s "$RAW/web-php-uploads.txt" ]; then take "$RAW/web-php-uploads.txt" 10
     add HOCH web "PHP-Dateien in Upload-/Medienordnern (häufiges Webshell-Versteck)" "${ITEMS[@]}"
   fi
 
-  grep -rIlsE --include='*.php' --include='*.phtml' --include='*.php[0-9]' \
+  find "${roots[@]}" -xdev \( "${prune[@]}" -false \) -prune -o -type f \( -name '*.php' -o -name '*.phtml' -o -name '*.php[0-9]' \) -print0 2>/dev/null \
+    | xargs -0 -r grep -IlsE \
     'eval[[:space:]]*\([[:space:]]*(base64_decode|gzinflate|gzuncompress|str_rot13|strrev)[[:space:]]*\(|assert[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)|(system|passthru|shell_exec|exec|popen|proc_open)[[:space:]]*\([[:space:]]*\$_(GET|POST|REQUEST|COOKIE)|\$_(POST|GET|REQUEST|COOKIE)\[[^]]+\][[:space:]]*\(|FilesMan|c99shell|r57shell|b374k|WSO [0-9]|\$GLOBALS\[.{0,40}\]\[[0-9]+\]\(' \
-    "${roots[@]}" 2>/dev/null >"$RAW/web-shell-sig.txt"
+    2>/dev/null >"$RAW/web-shell-sig.txt"
   if [ -s "$RAW/web-shell-sig.txt" ]; then take "$RAW/web-shell-sig.txt" 10
     add HOCH web "$(grep -c . "$RAW/web-shell-sig.txt") PHP-Dateien mit typischen Webshell-Mustern" "${ITEMS[@]}" "Einzeln prüfen – vereinzelt auch in legitimen Plugins"
   fi
@@ -1216,7 +1296,8 @@ run_webcheck() {
   if [ ! -f "$dir/webcheck.py" ]; then
     add NIEDRIG "$1" "Prüfprogramm webcheck.py fehlt" "Neu installieren: sudo ./ubusec --install"; return 0
   fi
-  SITES_EXCLUDE="$SITES_EXCLUDE" SITES_EXTRA="$SITES_EXTRA" SITES_TESTSSL="$SITES_TESTSSL" \
+  local cvef=0; [[ " ${RUN_MODULES:-} " == *" cve "* ]] && cvef=1
+  UBUSEC_CVE_FOLLOWS=$cvef SITES_EXCLUDE="$SITES_EXCLUDE" SITES_EXTRA="$SITES_EXTRA" SITES_TESTSSL="$SITES_TESTSSL" \
   WPSCAN_API_TOKEN="$WPSCAN_API_TOKEN" WEB_PATHS="$WEB_PATHS" RAW="$RAW" STATE_DIR="$STATE_DIR" \
   UBUSEC_VERSION="$UBUSEC_VERSION" UBUSEC_REPO="$UBUSEC_REPO" UPDATE_CHECK="$UPDATE_CHECK" TOOLS_JSON="$STATE_DIR/tools.json" \
     timeout 4h python3 -I "$dir/webcheck.py" "$1" --raw "$RAW" --mode "$MODE" >"$RAW/$1.tsv" 2>"$RAW/$1.err"
