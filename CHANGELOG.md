@@ -2,7 +2,7 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
-## Unveröffentlicht
+## 1.4.3 – 2026-11-02
 
 - **Empfehlungen herunterladen:** Auf der Seite „Empfehlungen“ lassen sich alle offenen Punkte samt Begründung und
   Behebung als HTML (zum Lesen und Drucken), als CSV-Tabelle (mit Spalte „Erledigt“ zum Abhaken in Excel/LibreOffice)
