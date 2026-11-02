@@ -71,7 +71,7 @@
   <p id="pg-text">{% if status.running %}Schritt {{ status.index }} von {{ status.total }}: {{ status.module_title }}{% else %}Warte auf den Start …{% endif %}</p>
   <div class="pg-sub" id="pg-sub" {% if not status.sub_total and not status.sub_text %}hidden{% endif %}
        data-start="{{ status.sub_start or 0 }}">
-    <progress id="pg-subbar" max="{{ status.sub_total or 1 }}" value="{{ status.sub_done or 0 }}"></progress>
+    <progress id="pg-subbar" max="{{ status.sub_total or 1 }}" value="{{ status.sub_done or 0 }}" {% if not status.sub_total %}hidden{% endif %}></progress>
     <p id="pg-subtext">{% if status.sub_total %}{{ status.sub_done }} von {{ status.sub_total }} Dateien{% endif %}</p>
     <p class="pg-dir" id="pg-dir">{% if status.sub_text %}{{ status.sub_text }}{% endif %}</p>
   </div>

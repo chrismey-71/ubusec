@@ -329,7 +329,17 @@ mod_config() {
   # --- Lynis ---------------------------------------------------------------
   if need lynis config lynis; then
     lynis audit system --cronjob --no-colors --quiet \
-      --report-file "$RAW/lynis-report.dat" --logfile "$RAW/lynis.log" >"$RAW/lynis.out" 2>&1
+      --report-file "$RAW/lynis-report.dat" --logfile "$RAW/lynis.log" >"$RAW/lynis.out" 2>&1 &
+    local lpid=$! ltest
+    # Fortschritt für die Weboberfläche: aktuellen Lynis-Test aus dem Protokoll zeigen
+    SUB_START=$(date +%s)
+    while kill -0 "$lpid" 2>/dev/null; do
+      ltest=$(grep -a 'Performing test ID' "$RAW/lynis.log" 2>/dev/null | tail -n1 | sed -E 's/.*Performing test ID ([A-Z0-9-]+) \((.*)\).*/Lynis-Test \1: \2/')
+      if [ -n "$ltest" ] && [ "$ltest" != "$SUB_TEXT" ]; then SUB_TEXT=$ltest; write_status true "$CUR_MOD" "$MOD_I" "$MOD_N"; fi
+      sleep 5
+    done
+    wait "$lpid" 2>/dev/null
+    SUB_TEXT=""
     # auch an den Standardort legen, damit „lynis show details TEST-ID“ funktioniert
     [ -s "$RAW/lynis.log" ] && install -m 0640 "$RAW/lynis.log" /var/log/lynis.log
     [ -s "$RAW/lynis-report.dat" ] && install -m 0640 "$RAW/lynis-report.dat" /var/log/lynis-report.dat

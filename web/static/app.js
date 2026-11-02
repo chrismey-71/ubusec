@@ -118,7 +118,7 @@
       sub.hidden = !hasSub;
       if (hasSub) {
         const sb = document.getElementById("pg-subbar");
-        sb.max = st.sub_total || 1; sb.value = st.sub_done || 0;
+        sb.max = st.sub_total || 1; sb.value = st.sub_done || 0; sb.hidden = !st.sub_total;
         const fmt = (n) => Number(n || 0).toLocaleString("de-AT");
         let t = st.sub_total ? fmt(st.sub_done) + " von " + fmt(st.sub_total) + " Dateien" : "";
         if (st.sub_total && st.sub_done > 0 && st.sub_start) {

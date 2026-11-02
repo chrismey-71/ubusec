@@ -4,6 +4,8 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- Fortschrittsanzeige zeigt während des Lynis-Audits den gerade laufenden Test (z. B. „Lynis-Test FILE-6310: …“),
+  damit sichtbar ist, dass der Scan arbeitet.
 - Behoben: Auf neueren Ubuntu-Versionen (z. B. 26.04) legte die Installation /usr/local/lib/ubusec nur für root
   lesbar an; die Weboberfläche startete dann nicht („Permission denied“).
 - Installation der Weboberfläche: ubusec prüft, ob der Dienstbenutzer die Programmdateien lesen kann, und zeigt
