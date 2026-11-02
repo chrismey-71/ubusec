@@ -4,6 +4,13 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.4.4 – 2026-11-02
 
+- **„Soll ubusec das für dich ändern?“** – Korrekturen auf Knopfdruck für eindeutig umsetzbare Punkte:
+  wp-config.php schützen (chmod 640), Datei-Editor abschalten (DISALLOW_FILE_EDIT), PHP im Upload-Ordner sperren,
+  xmlrpc.php sperren (ganz oben in der .htaccess, außerhalb der Blöcke von WordPress und Wordfence), rpcbind
+  abschalten (nur ohne NFS). Vor jeder Änderung wird gesichert; Besitzer und Rechte bleiben erhalten; wp-config.php
+  wird mit php -l geprüft; nach Website-Änderungen ruft ubusec die Startseite auf und nimmt die Änderung bei einem
+  Serverfehler sofort selbst zurück. Jede Änderung lässt sich mit „Rückgängig machen“ zurücknehmen und steht im
+  Protokoll. SSH- und Firewall-Änderungen gibt es bewusst nicht per Knopfdruck (Gefahr, sich auszusperren).
 - **„Soll ubusec das für dich prüfen?“** – Nachprüfung auf Knopfdruck direkt im Befund (nur lesend, läuft als root
   über die geprüfte Steuer-Warteschlange):
   - chkrootkit „INFECTED“ und veränderte Paketdateien: Vergleich mit dem frisch geladenen Ubuntu-Originalpaket,

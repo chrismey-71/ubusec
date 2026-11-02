@@ -67,6 +67,36 @@
       {% endif %}
     </div>
     {% endif %}
+    {% if f.fixes and actions %}
+    <div class="fixbox">
+      <h4>Soll ubusec das für dich ändern?</h4>
+      {% for x in f.fixes %}{% set fr = fix_result(x.id) %}{% set res = fr[0] %}
+      <div class="fix-item" data-fid="{{ x.id }}" data-pending="{{ 1 if fr[1] else 0 }}">
+        <p><b>{{ x.title }}</b>{% if x.domain %} <span class="muted">– {{ x.domain }}</span>{% endif %}<br><span class="small">{{ x.text }}</span></p>
+        {% if fr[1] %}
+          <p class="muted">Wird ausgeführt …</p>
+        {% else %}
+          {% if res %}
+            <p class="fix-res fix-{{ res.status }}">{{ {'applied': '✓ Geändert:', 'nothing': '✓', 'undone': '↺', 'refused': '! Nicht geändert:', 'failed': '✗', 'rolledback': '✗ Zurückgenommen:'}[res.status] }} {{ res.message }}
+              {% if res.health and res.health.after %}<br><span class="small muted">Website {{ res.health.domain }} antwortet: vorher {{ res.health.before or '–' }}, nachher {{ res.health.after }}</span>{% endif %}
+              <br><span class="small muted">{{ res.time | ago }}</span></p>
+            {% if res.lines %}<pre class="fix-lines">{{ res.lines | join('\n') }}</pre>{% endif %}
+          {% endif %}
+          <form method="post" action="{{ url_for('fix_start') }}" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="report" value="{{ r.id }}">
+            <input type="hidden" name="idx" value="{{ f.idx }}"><input type="hidden" name="n" value="{{ loop.index0 }}">
+            {% if res and res.status == 'applied' %}
+              <button class="btn btn-quiet" name="op" value="undo" data-confirm="Änderung zurücknehmen und den vorherigen Zustand wiederherstellen?">Rückgängig machen</button>
+              <span class="small muted">Der Punkt verschwindet beim nächsten Prüflauf dieses Bereichs.</span>
+            {% else %}
+              <button class="btn" name="op" value="apply" data-confirm="{{ x.title }}{% if x.domain %} für {{ x.domain }}{% endif %} jetzt ändern? Vorher wird gesichert; „Rückgängig machen“ ist danach möglich.">Jetzt ändern</button>
+            {% endif %}
+          </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
     {% if h.alarm and f.severity in ('KRITISCH', 'HOCH') %}
     <div class="alarm">
       <h4>Wenn sich ein Einbruch bestätigt</h4>

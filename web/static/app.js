@@ -68,6 +68,20 @@
     setTimeout(poll, 2000);
   });
 
+  // Korrektur auf Knopfdruck: auf das Ergebnis warten
+  document.querySelectorAll(".fix-item[data-pending='1']").forEach((box) => {
+    const det = box.closest("details"); if (det) det.open = true;
+    const poll = async () => {
+      try {
+        const r = await fetch("/api/aenderung/" + box.dataset.fid, { credentials: "same-origin" });
+        const j = await r.json();
+        if (!j.pending) { location.reload(); return; }
+      } catch (_) { /* später erneut */ }
+      setTimeout(poll, 2000);
+    };
+    setTimeout(poll, 1500);
+  });
+
   // Empfehlungen: nach Aufwand ordnen und filtern
   const ebar = document.getElementById("effort-bar");
   if (ebar) {

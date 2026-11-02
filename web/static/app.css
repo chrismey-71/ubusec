@@ -391,3 +391,12 @@ pre.notes { white-space: pre-wrap; font-family: var(--sans); font-size: .95rem; 
 .verify-rows tr.st-bad td { color: var(--krit); font-weight: 700; }
 .verify-rows tr.st-bad td::before { content: "✗ "; }
 .verify form.inline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.fixbox { margin-top: 1rem; padding: .8rem 1rem; border: 1px solid var(--action); border-radius: 6px; background: var(--surface); }
+.fixbox h4 { margin: 0 0 .5rem; color: var(--action); }
+.fix-item + .fix-item { border-top: 1px solid var(--line); margin-top: .6rem; padding-top: .6rem; }
+.fix-item p { margin: .2rem 0 .4rem; }
+.fix-res.fix-applied, .fix-res.fix-nothing { color: var(--ok); }
+.fix-res.fix-refused { color: var(--mittel); }
+.fix-res.fix-failed, .fix-res.fix-rolledback { color: var(--krit); }
+.fix-lines { font-family: var(--mono); font-size: .82rem; background: var(--code-bg); padding: .4rem .6rem; border-radius: 4px; white-space: pre-wrap; margin: .2rem 0 .5rem; }
+.fixbox form.inline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }

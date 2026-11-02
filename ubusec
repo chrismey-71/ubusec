@@ -1733,6 +1733,7 @@ do_install() {
   if [ -f "$SRC_DIR/checks/webcheck.py" ] && [ "$(readlink -f "$SRC_DIR/checks")" != "$CHECK_DIR" ]; then
     install -d -m 0755 /usr/local/lib/ubusec "$CHECK_DIR"; install -m 0644 "$SRC_DIR/checks/webcheck.py" "$CHECK_DIR/webcheck.py"
     [ -f "$SRC_DIR/checks/verify.py" ] && install -m 0644 "$SRC_DIR/checks/verify.py" "$CHECK_DIR/verify.py"
+    [ -f "$SRC_DIR/checks/fix.py" ] && install -m 0644 "$SRC_DIR/checks/fix.py" "$CHECK_DIR/fix.py"
   fi
   write_conf
   configure_rkhunter
@@ -2175,6 +2176,23 @@ process_queue() { # process_queue req|ctl
                "$vk" "$(date +%s)" "$LOG_DIR/verify.log" >"$vdir/$vid.json"
         chgrp "$(grp)" "$vdir/$vid.json" 2>/dev/null; chmod 640 "$vdir/$vid.json" 2>/dev/null
         find "$vdir" -name '*.json' -mtime +30 -delete 2>/dev/null ;;
+      fix)
+        # Korrektur auf Knopfdruck: nur die fest eingebauten Arten, Ziel streng geprüft; fix.py prüft erneut,
+        # sichert vor jeder Änderung und nimmt sie bei Fehlern der Website selbst zurück
+        local fo=${REQ[op]:-} fk=${REQ[kind]:-} ft=${REQ[target]:-} fd=${REQ[domain]:-} fid=${REQ[id]:-} fdir=$STATE_DIR/fixes
+        [[ $fo =~ ^(apply|undo)$ ]] || { audit "ABGELEHNT $user: Korrektur-Aktion"; continue; }
+        [[ $fk =~ ^(wp-chmod|wp-fileedit|wp-uploads|wp-xmlrpc|svc-rpcbind)$ ]] || { audit "ABGELEHNT $user: Korrektur-Art '$fk'"; continue; }
+        [[ $fid =~ ^[a-f0-9]{16}$ ]] || { audit "ABGELEHNT $user: Korrektur-ID"; continue; }
+        if [ "$fk" = svc-rpcbind ]; then [ "$ft" = rpcbind ] || { audit "ABGELEHNT $user: Korrektur-Ziel"; continue; }
+        else [[ $ft =~ ^/(home|var/www|srv)/[A-Za-z0-9._/@+:-]{1,300}$ && $ft != *"/../"* ]] || { audit "ABGELEHNT $user: Korrektur-Ziel"; continue; }; fi
+        [[ -z $fd || $fd =~ ^[A-Za-z0-9.-]{3,253}$ ]] || fd=""
+        install -d -m 0750 -o root -g "$(grp)" "$fdir"
+        audit "KORREKTUR $fo $user: $fk $ft"
+        local fdirc=$CHECK_DIR; [ -f "$fdirc/fix.py" ] || fdirc=$SRC_DIR/checks
+        UBUSEC_STATE=$STATE_DIR timeout 5m python3 -I "$fdirc/fix.py" "$fo" "$fk" "$ft" "$fdir/$fid.json" $fd >>"$LOG_DIR/fix.log" 2>&1 \
+          || printf '{"kind":"%s","time":%s,"status":"failed","message":"Die Korrektur ist fehlgeschlagen (siehe %s).","lines":[]}\n' \
+               "$fk" "$(date +%s)" "$LOG_DIR/fix.log" >"$fdir/$fid.json"
+        chgrp "$(grp)" "$fdir/$fid.json" 2>/dev/null; chmod 640 "$fdir/$fid.json" 2>/dev/null ;;
       testnotify)
         local tf=$STATE_DIR/work/test-mail.txt rc=0
         printf 'Dies ist eine Testnachricht von ubusec auf %s (%s).\nWenn du sie liest, funktionieren die Benachrichtigungen.\n' \

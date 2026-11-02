@@ -222,6 +222,8 @@ def load_report(path):
         fd["idx"] = i
         fd["hint"] = hint_for(fd["module"], fd["message"], fd.get("details", []))
         fd["verify"] = verify_spec(fd)
+    for fd in doc.get("findings", []):
+        fd["fixes"] = fix_specs(fd, doc)
     with _cache_lock:
         _cache[path] = (st.st_mtime, doc)
     return doc
@@ -284,6 +286,78 @@ def verify_result(vid):
     except OSError:
         asked = 0
     pending = asked and time.time() - asked < 1200 and (not res or res.get("time", 0) < asked - 1)
+    return res, bool(pending)
+
+
+# ------------------------------------------------------------ Korrekturen auf Knopfdruck ---
+FIX_DIR = os.path.join(STATE_DIR, "fixes")
+FIX_PENDING = os.path.join(WEB_STATE, "fix-pending")
+FIX_TEXT = {
+    "wp-chmod": ("wp-config.php schützen (chmod 640)",
+                 "Setzt die Rechte von {t} auf 640: nur Besitzer und Gruppe dürfen die Datei lesen. Danach ruft ubusec die "
+                 "Website auf und nimmt die Änderung sofort zurück, falls sie nicht mehr antwortet."),
+    "wp-fileedit": ("Datei-Editor im Backend abschalten",
+                    "Fügt in {t} vor „That's all, stop editing“ die Zeile define('DISALLOW_FILE_EDIT', true); ein. "
+                    "Vorher wird gesichert; PHP prüft die Datei, und ubusec testet danach die Website."),
+    "wp-uploads": ("PHP-Ausführung im Upload-Ordner sperren",
+                   "Ergänzt {t}/.htaccess (oder legt sie an) mit einer Sperre für .php-Dateien. Bilder und andere Uploads "
+                   "bleiben abrufbar."),
+    "wp-xmlrpc": ("xmlrpc.php sperren",
+                  "Setzt ganz oben in {t}/.htaccess – vor den Blöcken von WordPress und Wordfence – eine Sperre für "
+                  "xmlrpc.php. Nicht verwenden, wenn du die WordPress-App oder Jetpack nutzt."),
+    "svc-rpcbind": ("rpcbind abschalten",
+                    "Stoppt rpcbind und startet es nicht mehr beim Hochfahren. ubusec prüft vorher, dass kein NFS genutzt "
+                    "wird, und bricht sonst ab."),
+}
+
+
+def fix_specs(f, report):
+    """Passende Korrekturen zu einem Befund – Ziele nur aus den Befunddetails, nie aus Benutzereingaben."""
+    mod, msg, det = f.get("module"), f.get("message", ""), f.get("details", [])
+    # Zuordnung Pfad → Domain aus allen WordPress-Hinweisen des Berichts („domain: in /pfad …“)
+    dom = {}
+    for g in report.get("findings", []):
+        for d in g.get("details", []):
+            m = re.match(r"^([A-Za-z0-9.-]+\.[A-Za-z]{2,})(?:/\S*)?: in (/\S+)", d)
+            if m:
+                dom[os.path.dirname(m.group(2))] = m.group(1)
+    out = []
+
+    def add(kind, target, domain=""):
+        if not domain:
+            domain = next((v for k, v in dom.items() if target.startswith(k) or k.startswith(target)), "")
+        fid = hashlib.sha256(("%s|%s" % (kind, target)).encode()).hexdigest()[:16]
+        title, text = FIX_TEXT[kind]
+        out.append({"kind": kind, "target": target, "domain": domain, "id": fid, "title": title,
+                    "text": text.format(t=target)})
+    for d in det:
+        m = re.match(r"^Befehl: sudo chmod 640 (/\S+/wp-config\.php)$", d)
+        if m and "wp-config.php für alle" in msg:
+            add("wp-chmod", m.group(1))
+        m = re.match(r"^([A-Za-z0-9.-]+)(?:/\S*)?: in (/\S+/wp-config\.php) vor", d)
+        if m and "Datei-Editor" in msg:
+            add("wp-fileedit", m.group(2), m.group(1))
+        m = re.search(r"tee -a (/\S+/wp-content/uploads)/\.htaccess$", d)
+        if m and "Upload-Ordner" in msg:
+            add("wp-uploads", m.group(1))
+        m = re.match(r"^([A-Za-z0-9.-]+)(?:/\S*)?: in (/\S+)/\.htaccess oberhalb", d)
+        if m and "xmlrpc" in msg:
+            add("wp-xmlrpc", m.group(2), m.group(1))
+    if mod == "firewall" and re.search(r"(^|\s|: )111/(tcp|udp)\(rpcbind\)", msg):
+        add("svc-rpcbind", "rpcbind")
+    for x in out:
+        if not re.fullmatch(r"/(home|var/www|srv)/[A-Za-z0-9._/@+:-]{1,300}|rpcbind", x["target"]):
+            x["blocked"] = True   # Pfad mit Sonderzeichen – nur von Hand
+    return [x for x in out if not x.get("blocked")]
+
+
+def fix_result(fid):
+    res = read_json(os.path.join(FIX_DIR, fid + ".json"), None)
+    try:
+        asked = os.path.getmtime(os.path.join(FIX_PENDING, fid))
+    except OSError:
+        asked = 0
+    pending = asked and time.time() - asked < 600 and (not res or res.get("time", 0) < asked - 1)
     return res, bool(pending)
 
 
@@ -904,6 +978,10 @@ def create_app():
     def f_titles(mods):
         return ", ".join(MOD_TITLE.get(m, m) for m in mods)
 
+    @app.template_global("fix_result")
+    def g_fix_result(fid):
+        return fix_result(fid)
+
     @app.template_global("verify_result")
     def g_verify_result(vid):
         return verify_result(vid)
@@ -1121,6 +1199,31 @@ def create_app():
         enqueue_ctl({"action": "verify", "kind": spec["kind"], "id": spec["id"], "args": " ".join(spec["args"]),
                      "user": session["user"]})
         return redirect((request.referrer or url_for("recommendations")).split("#")[0] + "#f-%s-%s" % (r["id"], f["idx"]))
+
+    @app.route("/aendern", methods=["POST"])
+    def fix_start():
+        r = get_report(request.form.get("report", ""))
+        try:
+            f = r["findings"][int(request.form.get("idx", "-1"))]
+            spec = f["fixes"][int(request.form.get("n", "-1"))]
+        except (TypeError, ValueError, IndexError, KeyError):
+            abort(400)
+        op = request.form.get("op")
+        if op not in ("apply", "undo"):
+            abort(400)
+        os.makedirs(FIX_PENDING, exist_ok=True)
+        with open(os.path.join(FIX_PENDING, spec["id"]), "w") as fh:
+            fh.write(str(int(time.time())))
+        enqueue_ctl({"action": "fix", "op": op, "kind": spec["kind"], "target": spec["target"], "domain": spec["domain"],
+                     "id": spec["id"], "user": session["user"]})
+        return redirect((request.referrer or url_for("recommendations")).split("#")[0] + "#f-%s-%s" % (r["id"], f["idx"]))
+
+    @app.route("/api/aenderung/<fid>")
+    def fix_status(fid):
+        if not re.fullmatch(r"[a-f0-9]{16}", fid):
+            abort(404)
+        res, pending = fix_result(fid)
+        return jsonify({"pending": pending, "done": bool(res)})
 
     @app.route("/api/pruefung/<vid>")
     def verify_status(vid):
