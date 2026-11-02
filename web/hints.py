@@ -141,7 +141,7 @@ _H = [
         steps=["In der SSH-Konfiguration: X11Forwarding no", "$ sudo systemctl reload ssh"], effort="5 Min")),
     (r"^config\|SSH: MaxAuthTries", dict(
         why="Weniger Versuche pro Verbindung bremsen Rateangriffe.",
-        steps=["In der SSH-Konfiguration: MaxAuthTries 3", "$ sudo systemctl reload ssh"], effort="5 Min")),
+        steps=["In der SSH-Konfiguration: MaxAuthTries 4", "$ sudo systemctl reload ssh"], effort="5 Min")),
     (r"^config\|\d+ Kernel-Parameter", dict(
         why="Diese Kernel-Einstellungen erschweren das Ausnutzen von Lücken und bestimmte Netzwerkangriffe.",
         steps=["Werte aus der Liste in /etc/sysctl.d/99-ubusec.conf eintragen, z. B. fs.protected_symlinks = 1",

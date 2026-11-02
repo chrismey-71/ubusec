@@ -305,6 +305,24 @@ FIX_TEXT = {
     "wp-xmlrpc": ("xmlrpc.php sperren",
                   "Setzt ganz oben in {t}/.htaccess – vor den Blöcken von WordPress und Wordfence – eine Sperre für "
                   "xmlrpc.php. Nicht verwenden, wenn du die WordPress-App oder Jetpack nutzt."),
+    "sysctl": ("Kernel-Parameter härten",
+               "Schreibt die empfohlenen Werte nach /etc/sysctl.d/99-ubusec.conf und setzt sie sofort. IP-Weiterleitung "
+               "(für Docker/VPN) bleibt unberührt."),
+    "ssh-safe": ("SSH: X11Forwarding aus, MaxAuthTries 4",
+                 "Legt /etc/ssh/sshd_config.d/01-ubusec.conf an, prüft sie mit sshd -t und lädt SSH neu. Bestehende "
+                 "Sitzungen bleiben offen. Danach bitte sofort in einem neuen Terminal anmelden – bietet dein SSH-Programm "
+                 "sehr viele Schlüssel an, kann die Grenze von 4 Versuchen greifen (dann „Rückgängig machen“)."),
+    "postfix-banner": ("Postfix-Banner verkürzen, VRFY abschalten",
+                       "Setzt smtpd_banner = $myhostname ESMTP und disable_vrfy_command = yes, prüft mit postfix check und "
+                       "lädt Postfix neu. Mails werden weiter normal zugestellt."),
+    "bind-version": ("BIND-Version verbergen",
+                     "Ergänzt version \"none\"; im options-Block von /etc/bind/named.conf.options, prüft mit "
+                     "named-checkconf und lädt BIND neu."),
+    "php-ini": ("php.ini anpassen",
+                "Setzt in {t} session.cookie_httponly = 1 und expose_php = Off und lädt PHP-FPM neu."),
+    "quarantine": ("In die Sicherung verschieben",
+                   "Verschiebt {t} aus dem Webverzeichnis in die Sicherung von ubusec. „Rückgängig machen“ legt die "
+                   "Datei unverändert zurück."),
     "svc-rpcbind": ("rpcbind abschalten",
                     "Stoppt rpcbind und startet es nicht mehr beim Hochfahren. ubusec prüft vorher, dass kein NFS genutzt "
                     "wird, und bricht sonst ab."),
@@ -345,8 +363,24 @@ def fix_specs(f, report):
             add("wp-xmlrpc", m.group(2), m.group(1))
     if mod == "firewall" and re.search(r"(^|\s|: )111/(tcp|udp)\(rpcbind\)", msg):
         add("svc-rpcbind", "rpcbind")
+    if mod == "config" and "Kernel-Parameter (sysctl) nicht gehärtet" in msg:
+        add("sysctl", "kernel")
+    if mod == "config" and re.match(r"SSH: (X11Forwarding aktiv|MaxAuthTries)", msg):
+        add("ssh-safe", "sshd")
+    if mod == "config" and "information disclosure in SMTP banner" in msg:
+        add("postfix-banner", "postfix")
+    if mod == "config" and "Found BIND version in banner" in msg:
+        add("bind-version", "bind")
+    if mod == "apps" and re.match(r"PHP: (Session-Cookies ohne HttpOnly|expose_php aktiv)", msg):
+        for d in det:
+            if re.fullmatch(r"/(etc/php|home)/[A-Za-z0-9._/-]{1,200}/php\.ini", d):
+                add("php-ini", d)
+    for d in det:
+        m = re.match(r"^(?:Datei|Ordner): (/\S+)$", d)
+        if m and re.search(r"phpinfo|\.DS_Store|Archive in Plugin|Roundcube: Installer", msg):
+            add("quarantine", m.group(1))
     for x in out:
-        if not re.fullmatch(r"/(home|var/www|srv)/[A-Za-z0-9._/@+:-]{1,300}|rpcbind", x["target"]):
+        if not re.fullmatch(r"/(home|var/www|srv|etc/php)/[A-Za-z0-9._/@+:-]{1,300}|rpcbind|kernel|sshd|postfix|bind", x["target"]):
             x["blocked"] = True   # Pfad mit Sonderzeichen – nur von Hand
     return [x for x in out if not x.get("blocked")]
 

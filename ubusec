@@ -2181,10 +2181,20 @@ process_queue() { # process_queue req|ctl
         # sichert vor jeder Änderung und nimmt sie bei Fehlern der Website selbst zurück
         local fo=${REQ[op]:-} fk=${REQ[kind]:-} ft=${REQ[target]:-} fd=${REQ[domain]:-} fid=${REQ[id]:-} fdir=$STATE_DIR/fixes
         [[ $fo =~ ^(apply|undo)$ ]] || { audit "ABGELEHNT $user: Korrektur-Aktion"; continue; }
-        [[ $fk =~ ^(wp-chmod|wp-fileedit|wp-uploads|wp-xmlrpc|svc-rpcbind)$ ]] || { audit "ABGELEHNT $user: Korrektur-Art '$fk'"; continue; }
+        [[ $fk =~ ^(wp-chmod|wp-fileedit|wp-uploads|wp-xmlrpc|svc-rpcbind|sysctl|ssh-safe|postfix-banner|bind-version|php-ini|quarantine)$ ]] \
+          || { audit "ABGELEHNT $user: Korrektur-Art '$fk'"; continue; }
         [[ $fid =~ ^[a-f0-9]{16}$ ]] || { audit "ABGELEHNT $user: Korrektur-ID"; continue; }
-        if [ "$fk" = svc-rpcbind ]; then [ "$ft" = rpcbind ] || { audit "ABGELEHNT $user: Korrektur-Ziel"; continue; }
-        else [[ $ft =~ ^/(home|var/www|srv)/[A-Za-z0-9._/@+:-]{1,300}$ && $ft != *"/../"* ]] || { audit "ABGELEHNT $user: Korrektur-Ziel"; continue; }; fi
+        local fok=0
+        case $fk in
+          svc-rpcbind) [ "$ft" = rpcbind ] && fok=1 ;;
+          sysctl) [ "$ft" = kernel ] && fok=1 ;;
+          ssh-safe) [ "$ft" = sshd ] && fok=1 ;;
+          postfix-banner) [ "$ft" = postfix ] && fok=1 ;;
+          bind-version) [ "$ft" = bind ] && fok=1 ;;
+          php-ini) [[ $ft =~ ^/(etc/php|home)/[A-Za-z0-9._/-]{1,200}/php\.ini$ && $ft != *"/../"* ]] && fok=1 ;;
+          *) [[ $ft =~ ^/(home|var/www|srv)/[A-Za-z0-9._/@+:-]{1,300}$ && $ft != *"/../"* ]] && fok=1 ;;
+        esac
+        (( fok )) || { audit "ABGELEHNT $user: Korrektur-Ziel"; continue; }
         [[ -z $fd || $fd =~ ^[A-Za-z0-9.-]{3,253}$ ]] || fd=""
         install -d -m 0750 -o root -g "$(grp)" "$fdir"
         audit "KORREKTUR $fo $user: $fk $ft"

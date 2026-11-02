@@ -470,6 +470,10 @@ def check_domain(domain, vh, full):
                         agg("INFO", "Apache-Status-/Infoseite nur lokal freigegeben (Require local) – von außen gesperrt", "https://%s%s" % (domain, p))
                         continue
                     agg(sev, label, "https://%s%s" % (domain, p))
+                    # zugehörige Datei nennen (für die Korrektur auf Knopfdruck)
+                    dr = (vh.get(domain) or {}).get("docroot")
+                    if p in ("/phpinfo.php", "/info.php", "/test.php", "/.DS_Store") and dr and os.path.isfile(dr + p):
+                        agg(sev, label, "Datei: " + os.path.realpath(dr + p))
             except Exception:  # noqa: BLE001
                 pass
     for d in LISTING_DIRS:
@@ -948,6 +952,9 @@ def check_roundcube(path, vh):
             reach = bool(x and x.status == 200 and b"Installer" in x.body)
         agg("HOCH" if reach else "MITTEL",
             "Roundcube: Installer öffentlich erreichbar" if reach else "Roundcube: Installer-Verzeichnis noch vorhanden", label)
+        agg("HOCH" if reach else "MITTEL",
+            "Roundcube: Installer öffentlich erreichbar" if reach else "Roundcube: Installer-Verzeichnis noch vorhanden",
+            "Ordner: " + os.path.join(path, "installer"))
     cfg = read(os.path.join(path, "config", "config.inc.php"))
     if re.search(r"\$config\['enable_installer'\]\s*=\s*true", cfg):
         agg("HOCH", "Roundcube: Installer in der Konfiguration aktiviert", label)
@@ -1005,6 +1012,8 @@ def scan_files(root, vh, known, budget):
                         # Teil eines Plugins/einer App (z. B. mitgelieferte Programme) – keine Sicherung mit Zugangsdaten
                         agg("NIEDRIG", "Archive in Plugin-/App-Ordnern öffentlich abrufbar (meist mitgeliefert)",
                             "https://%s%s" % (site[0], site[2]))
+                        if "/wp-content/" in p:
+                            agg("NIEDRIG", "Archive in Plugin-/App-Ordnern öffentlich abrufbar (meist mitgeliefert)", "Datei: " + p)
                     elif reach:
                         agg(sev, {"db": "Datenbank-Dumps öffentlich abrufbar", "secret": "Schlüssel- oder Zugangsdateien öffentlich abrufbar",
                                   "backup": "Sicherungskopien öffentlich abrufbar (Quellcode, Zugangsdaten)",
