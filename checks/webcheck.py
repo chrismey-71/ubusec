@@ -965,6 +965,14 @@ def check_roundcube(path, vh):
     return {"path": path, "version": ver}
 
 
+def read_bytes(p, limit):
+    try:
+        with open(p, "rb") as f:
+            return f.read(limit)
+    except OSError:
+        return b""
+
+
 SENSITIVE = [
     (re.compile(r"\.(sql|sql\.gz|sql\.zip|sql\.bz2|dump)$", re.I), "KRITISCH", "db"),
     (re.compile(r"(^|/)(\.env|id_rsa|id_ed25519)$|\.(pem|key|p12|pfx)$", re.I), "KRITISCH", "secret"),
@@ -992,6 +1000,10 @@ def scan_files(root, vh, known, budget):
             p = os.path.join(dirpath, fn)
             for rx, sev, kind in SENSITIVE:
                 if rx.search(fn):
+                    # .pem-Dateien sind meist öffentliche Zertifikate (z. B. die CA-Liste cacert.pem in Plugins) –
+                    # gefährlich ist nur ein privater Schlüssel darin
+                    if kind == "secret" and fn.lower().endswith(".pem") and b"PRIVATE KEY" not in read_bytes(p, 262144):
+                        break
                     # Roundcube liefert seine Datenbank-Schemas unter SQL/ mit (per .htaccess gesperrt)
                     if kind == "db" and "/SQL/" in p and os.path.isfile(os.path.join(p.split("/SQL/")[0], "program/include/iniset.php")):
                         break

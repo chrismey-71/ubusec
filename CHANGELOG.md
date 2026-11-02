@@ -4,6 +4,8 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- Fehlalarm behoben: .pem-Dateien gelten nur noch als Zugangsdaten, wenn sie einen privaten Schlüssel enthalten
+  (z. B. ist cacert.pem von UpdraftPlus nur die öffentliche Liste der Zertifizierungsstellen).
 - **Berichte löschen:** einzeln (samt Rohdaten) oder alle auf einmal unter „Berichte“.
 - **Empfehlungen neu beginnen:** Übersicht und Empfehlungen berücksichtigen danach nur Scans ab diesem Zeitpunkt,
   alle Punkte gelten wieder als „neu“; die Berichte bleiben erhalten. Beides ist während eines laufenden Scans gesperrt
