@@ -42,6 +42,31 @@
       </ol>
     </div>
     {% endif %}
+    {% if f.verify and actions %}
+    {% set v = f.verify %}{% set vr = verify_result(v.id) %}{% set res = vr[0] %}{% set pending = vr[1] %}
+    <div class="verify" data-vid="{{ v.id }}" data-pending="{{ 1 if pending else 0 }}">
+      {% if pending %}
+        <h4>Prüfung läuft …</h4>
+        <p class="muted small">Das Ergebnis erscheint hier automatisch, meist nach wenigen Sekunden (Pakete herunterladen kann etwas dauern).</p>
+      {% elif res %}
+        <h4 class="verdict verdict-{{ res.verdict }}">{{ res.summary }}</h4>
+        <table class="verify-rows">
+          {% for row in res.rows %}<tr class="st-{{ row.state }}"><th>{{ row.item }}</th><td>{{ row.result }}</td></tr>{% endfor %}
+        </table>
+        <form method="post" action="{{ url_for('verify_start') }}" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="report" value="{{ r.id }}"><input type="hidden" name="idx" value="{{ f.idx }}">
+          <span class="muted small">Geprüft {{ res.time | ago }}.</span> <button class="btn btn-quiet">Erneut prüfen</button>
+        </form>
+      {% else %}
+        <h4>{{ v.title }}</h4>
+        <p class="small">{{ v.text }}</p>
+        <form method="post" action="{{ url_for('verify_start') }}">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="report" value="{{ r.id }}"><input type="hidden" name="idx" value="{{ f.idx }}">
+          <button class="btn">Jetzt prüfen</button> <span class="muted small">{{ v.args | length }} {{ 'Eintrag' if v.args|length == 1 else 'Einträge' }}: {{ v.args[:4] | join(', ') }}{% if v.args|length > 4 %} …{% endif %}</span>
+        </form>
+      {% endif %}
+    </div>
+    {% endif %}
     {% if h.alarm and f.severity in ('KRITISCH', 'HOCH') %}
     <div class="alarm">
       <h4>Wenn sich ein Einbruch bestätigt</h4>

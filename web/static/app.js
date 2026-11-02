@@ -54,6 +54,20 @@
     check();
   }
 
+  // Nachprüfung auf Knopfdruck: auf das Ergebnis warten, dann neu laden
+  document.querySelectorAll(".verify[data-pending='1']").forEach((box) => {
+    const det = box.closest("details"); if (det) det.open = true;
+    const poll = async () => {
+      try {
+        const r = await fetch("/api/pruefung/" + box.dataset.vid, { credentials: "same-origin" });
+        const j = await r.json();
+        if (!j.pending) { location.reload(); return; }
+      } catch (_) { /* später erneut */ }
+      setTimeout(poll, 2500);
+    };
+    setTimeout(poll, 2000);
+  });
+
   // Empfehlungen: nach Aufwand ordnen und filtern
   const ebar = document.getElementById("effort-bar");
   if (ebar) {

@@ -1732,6 +1732,7 @@ do_install() {
   ensure_dirs
   if [ -f "$SRC_DIR/checks/webcheck.py" ] && [ "$(readlink -f "$SRC_DIR/checks")" != "$CHECK_DIR" ]; then
     install -d -m 0755 /usr/local/lib/ubusec "$CHECK_DIR"; install -m 0644 "$SRC_DIR/checks/webcheck.py" "$CHECK_DIR/webcheck.py"
+    [ -f "$SRC_DIR/checks/verify.py" ] && install -m 0644 "$SRC_DIR/checks/verify.py" "$CHECK_DIR/verify.py"
   fi
   write_conf
   configure_rkhunter
@@ -2151,6 +2152,29 @@ process_queue() { # process_queue req|ctl
         audit "WERKZEUGE AKTUALISIEREN $user"; update_tools ;;
       lynisrepo)
         audit "LYNIS-PAKETQUELLE $user"; lynis_upstream || audit "LYNIS-PAKETQUELLE fehlgeschlagen" ;;
+      verify)
+        # Nachprüfung auf Knopfdruck (nur lesend): Art und Argumente streng prüfen
+        local vk=${REQ[kind]:-} vid=${REQ[id]:-} va=${REQ[args]:-} vrx a vdir=$STATE_DIR/verify vargs=()
+        case $vk in
+          binaries) vrx='^[a-z0-9._+-]{1,40}$' ;;
+          pkgfiles|fileinfo) vrx='^/[A-Za-z0-9._/@+:-]{1,300}$' ;;
+          ports) vrx='^[0-9]{1,5}$' ;;
+          *) audit "ABGELEHNT $user: Prüfart '$vk'"; continue ;;
+        esac
+        [[ $vid =~ ^[a-f0-9]{16}$ ]] || { audit "ABGELEHNT $user: Prüf-ID"; continue; }
+        for a in $va; do
+          [[ $a =~ $vrx ]] && [[ $a != *"/../"* ]] || { audit "ABGELEHNT $user: Prüfargument"; continue 2; }
+          vargs+=("$a")
+        done
+        (( ${#vargs[@]} > 0 && ${#vargs[@]} <= 20 )) || { audit "ABGELEHNT $user: Prüfargumente"; continue; }
+        install -d -m 0750 -o root -g "$(grp)" "$vdir"
+        audit "PRÜFUNG $user: $vk ${vargs[*]}"
+        local vdirc=$CHECK_DIR; [ -f "$vdirc/verify.py" ] || vdirc=$SRC_DIR/checks
+        timeout 15m python3 -I "$vdirc/verify.py" "$vk" "$vdir/$vid.json" "${vargs[@]}" >>"$LOG_DIR/verify.log" 2>&1 \
+          || printf '{"kind":"%s","time":%s,"verdict":"warn","summary":"Die Prüfung ist fehlgeschlagen (siehe %s).","rows":[]}\n' \
+               "$vk" "$(date +%s)" "$LOG_DIR/verify.log" >"$vdir/$vid.json"
+        chgrp "$(grp)" "$vdir/$vid.json" 2>/dev/null; chmod 640 "$vdir/$vid.json" 2>/dev/null
+        find "$vdir" -name '*.json' -mtime +30 -delete 2>/dev/null ;;
       testnotify)
         local tf=$STATE_DIR/work/test-mail.txt rc=0
         printf 'Dies ist eine Testnachricht von ubusec auf %s (%s).\nWenn du sie liest, funktionieren die Benachrichtigungen.\n' \

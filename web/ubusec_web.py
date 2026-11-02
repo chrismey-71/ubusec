@@ -221,9 +221,70 @@ def load_report(path):
     for i, fd in enumerate(doc.get("findings", [])):
         fd["idx"] = i
         fd["hint"] = hint_for(fd["module"], fd["message"], fd.get("details", []))
+        fd["verify"] = verify_spec(fd)
     with _cache_lock:
         _cache[path] = (st.st_mtime, doc)
     return doc
+
+
+# ------------------------------------------------------------ Nachprüfung auf Knopfdruck ---
+VERIFY_DIR = os.path.join(STATE_DIR, "verify")
+VERIFY_PENDING = os.path.join(WEB_STATE, "verify-pending")
+_PATH_TOKEN = re.compile(r"(?<![\w.])(/(?:tmp|var|dev|etc|usr|bin|sbin|lib|lib64|opt|home|root|srv|run)/[A-Za-z0-9._/@+:-]{1,300})")
+VERIFY_TEXT = {
+    "binaries": ("Soll ubusec das für dich prüfen?",
+                 "ubusec lädt das Ubuntu-Paket in der installierten Version frisch herunter und vergleicht die Programme "
+                 "byte-genau mit dem Original. Ändert nichts am System."),
+    "pkgfiles": ("Soll ubusec das für dich prüfen?",
+                 "ubusec lädt die zugehörigen Ubuntu-Pakete frisch herunter und vergleicht die Dateien byte-genau mit dem "
+                 "Original. Ändert nichts am System."),
+    "fileinfo": ("Soll ubusec die Dateien für dich ansehen?",
+                 "Steckbrief je Datei: Art, Größe, Besitzer, Änderungsdatum, Prüfsumme, zugehöriges Paket und welche "
+                 "Prozesse sie gerade nutzen. Ändert nichts am System."),
+    "ports": ("Soll ubusec für dich nachsehen, wer dort lauscht?",
+              "Zeigt je Port das Programm, seinen Speicherort, ob es aus einem Ubuntu-Paket stammt und ob es öffentlich "
+              "oder nur lokal erreichbar ist. Ändert nichts am System."),
+}
+
+
+def verify_spec(f):
+    """Welche Nachprüfung passt zu diesem Befund? (Art, Argumente) oder None – nur aus dem Befund abgeleitet."""
+    mod, msg, det = f.get("module"), f.get("message", ""), f.get("details", [])
+    text = " ".join([msg] + det)
+    kind, args = None, []
+    if mod == "rootkit" and "INFECTED" in text and "bindshell" not in text:
+        kind = "binaries"
+        args = re.findall(r"Checking `([a-z0-9._+-]{1,40})'", text)
+        for d in det:
+            m = re.match(r"Paket \S+: (.*)$", d)
+            if m:
+                args += [re.sub(r"\(.*", "", x) for x in m.group(1).split()]
+    elif mod == "integrity" and ("Paket-Original" in msg or "Paketdateien verändert" in msg):
+        kind, args = "pkgfiles", [d for d in det if re.fullmatch(r"/[A-Za-z0-9._/@+:-]{1,300}", d)]
+    elif mod in ("firewall",) and re.search(r"lauschen öffentlich|öffentlich erreichbar", msg) or \
+            (mod == "rootkit" and "bindshell" in text):
+        kind = "ports"
+        args = re.findall(r"(?<![\d.])(\d{1,5})/(?:tcp|udp)", msg) or re.findall(r"ports?:\s*([\d ]+)", text)
+        args = [a for x in args for a in str(x).split()]
+    elif mod == "rootkit" and re.search(r"temporären|/dev/shm|versteckte|Hidden|aus gelöschten", text):
+        kind = "fileinfo"
+        args = [m.rstrip(":") for m in _PATH_TOKEN.findall(text)]
+    args = list(dict.fromkeys(a for a in args if a))[:20]
+    if not kind or not args:
+        return None
+    vid = hashlib.sha256(("%s|%s" % (kind, " ".join(sorted(args)))).encode()).hexdigest()[:16]
+    title, text = VERIFY_TEXT[kind]
+    return {"kind": kind, "args": args, "id": vid, "title": title, "text": text}
+
+
+def verify_result(vid):
+    res = read_json(os.path.join(VERIFY_DIR, vid + ".json"), None)
+    try:
+        asked = os.path.getmtime(os.path.join(VERIFY_PENDING, vid))
+    except OSError:
+        asked = 0
+    pending = asked and time.time() - asked < 1200 and (not res or res.get("time", 0) < asked - 1)
+    return res, bool(pending)
 
 
 def report_paths():
@@ -843,6 +904,10 @@ def create_app():
     def f_titles(mods):
         return ", ".join(MOD_TITLE.get(m, m) for m in mods)
 
+    @app.template_global("verify_result")
+    def g_verify_result(vid):
+        return verify_result(vid)
+
     @app.template_filter("effort_group")
     def f_effort_group(e):
         return effort_group(e)
@@ -1039,6 +1104,30 @@ def create_app():
     @app.route("/api/status")
     def api_status():
         return jsonify(read_status())
+
+    @app.route("/pruefen", methods=["POST"])
+    def verify_start():
+        r = get_report(request.form.get("report", ""))
+        try:
+            f = r["findings"][int(request.form.get("idx", "-1"))]
+        except (TypeError, ValueError, IndexError, KeyError):
+            abort(400)
+        spec = f.get("verify")
+        if not spec:
+            abort(400)
+        os.makedirs(VERIFY_PENDING, exist_ok=True)
+        with open(os.path.join(VERIFY_PENDING, spec["id"]), "w") as fh:
+            fh.write(str(int(time.time())))
+        enqueue_ctl({"action": "verify", "kind": spec["kind"], "id": spec["id"], "args": " ".join(spec["args"]),
+                     "user": session["user"]})
+        return redirect((request.referrer or url_for("recommendations")).split("#")[0] + "#f-%s-%s" % (r["id"], f["idx"]))
+
+    @app.route("/api/pruefung/<vid>")
+    def verify_status(vid):
+        if not re.fullmatch(r"[a-f0-9]{16}", vid):
+            abort(404)
+        res, pending = verify_result(vid)
+        return jsonify({"pending": pending, "done": bool(res), "time": (res or {}).get("time", 0)})
 
     @app.route("/berichte")
     def reports():

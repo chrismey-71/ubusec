@@ -378,3 +378,16 @@ pre.notes { white-space: pre-wrap; font-family: var(--sans); font-size: .95rem; 
 .effort-bar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: 1.25rem 0 .5rem; font-size: .9rem; }
 .effort-bar[hidden], #effort-flat[hidden], .sev-group[hidden] { display: none; }
 .eff-tag { justify-self: end; font-size: .78rem; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 0 .5rem; white-space: nowrap; }
+.verify { margin-top: 1rem; padding: .8rem 1rem; border: 1px dashed var(--line); border-radius: 6px; background: var(--paper); }
+.verify h4 { margin: 0 0 .4rem; }
+.verify .verdict-ok { color: var(--ok); }
+.verify .verdict-warn { color: var(--mittel); }
+.verify .verdict-bad { color: var(--krit); }
+.verify-rows { width: 100%; border-collapse: collapse; font-size: .88rem; margin: .4rem 0 .6rem; }
+.verify-rows th, .verify-rows td { text-align: left; vertical-align: top; padding: .3rem .4rem; border-top: 1px solid var(--line); background: none; font-weight: 400; color: var(--ink); overflow-wrap: anywhere; }
+.verify-rows th { width: 34%; font-family: var(--mono); font-size: .82rem; }
+.verify-rows tr.st-ok td::before { content: "✓ "; color: var(--ok); font-weight: 700; }
+.verify-rows tr.st-warn td::before { content: "! "; color: var(--mittel); font-weight: 700; }
+.verify-rows tr.st-bad td { color: var(--krit); font-weight: 700; }
+.verify-rows tr.st-bad td::before { content: "✗ "; }
+.verify form.inline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }

@@ -4,6 +4,13 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.4.4 – 2026-11-02
 
+- **„Soll ubusec das für dich prüfen?“** – Nachprüfung auf Knopfdruck direkt im Befund (nur lesend, läuft als root
+  über die geprüfte Steuer-Warteschlange):
+  - chkrootkit „INFECTED“ und veränderte Paketdateien: Vergleich mit dem frisch geladenen Ubuntu-Originalpaket,
+  - Dateien in /tmp, /dev/shm und versteckte Dateien: Steckbrief mit Art, Besitzer, Datum, Prüfsumme, Paket und
+    nutzenden Prozessen,
+  - öffentliche Ports und Bindshell-Warnungen: welches Programm lauscht, aus welchem Paket, öffentlich oder lokal.
+  Das Ergebnis erscheint im Befund (✓ / ! / ✗) und bleibt für spätere Berichte erhalten.
 - **chkrootkit „INFECTED“ bei Systemprogrammen** (z. B. basename, date, ls – häufig mit den Rust-Coreutils von Ubuntu
   25.10/26.04): ubusec lädt das Paket in der installierten Version frisch von Ubuntu und vergleicht die Programme
   byte-genau. Identisch → als Fehlalarm erkannt (INFO); abweichend → KRITISCH; ohne Verbindung → Abgleich mit der
