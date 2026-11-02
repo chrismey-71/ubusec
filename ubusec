@@ -2237,6 +2237,28 @@ process_queue() { # process_queue req|ctl
           || printf '{"kind":"%s","time":%s,"status":"failed","message":"Die Korrektur ist fehlgeschlagen (siehe %s).","lines":[]}\n' \
                "$fk" "$(date +%s)" "$LOG_DIR/fix.log" >"$fdir/$fid.json"
         chgrp "$(grp)" "$fdir/$fid.json" 2>/dev/null; chmod 640 "$fdir/$fid.json" 2>/dev/null ;;
+      delreport|delreports|resetrecs)
+        # Berichte löschen bzw. Empfehlungen neu beginnen – nicht während eines laufenden Scans
+        if grep -q '"running":true' "$STATE_DIR/status.json" 2>/dev/null && kill -0 "$(sed -n 's/.*"pid":\([0-9]*\).*/\1/p' "$STATE_DIR/status.json")" 2>/dev/null; then
+          audit "ABGELEHNT $user: $action während eines laufenden Scans"; continue
+        fi
+        case $action in
+          delreport)
+            local rid=${REQ[rid]:-}
+            [[ $rid =~ ^[0-9]{8}-[0-9]{6}-(quick|full)$ ]] || { audit "ABGELEHNT $user: Bericht-ID"; continue; }
+            rm -f "$LOG_DIR/report-$rid.json" "$LOG_DIR/report-$rid.txt" "$LOG_DIR/report-$rid.html"
+            rm -rf -- "$LOG_DIR/raw/${rid%-*}"
+            audit "BERICHT GELÖSCHT $user: $rid" ;;
+          delreports)
+            rm -f "$LOG_DIR"/report-*.json "$LOG_DIR"/report-*.txt "$LOG_DIR"/report-*.html "$STATE_DIR"/last-findings.*.tsv
+            find "$LOG_DIR/raw" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*-[0-9]*' -exec rm -rf -- {} + 2>/dev/null
+            rm -f "$STATE_DIR/recs-reset"
+            audit "ALLE BERICHTE GELÖSCHT $user" ;;
+          resetrecs)
+            touch "$STATE_DIR/recs-reset"; chgrp "$(grp)" "$STATE_DIR/recs-reset"; chmod 640 "$STATE_DIR/recs-reset"
+            rm -f "$STATE_DIR"/last-findings.*.tsv
+            audit "EMPFEHLUNGEN ZURÜCKGESETZT $user" ;;
+        esac ;;
       testnotify)
         local tf=$STATE_DIR/work/test-mail.txt rc=0
         printf 'Dies ist eine Testnachricht von ubusec auf %s (%s).\nWenn du sie liest, funktionieren die Benachrichtigungen.\n' \

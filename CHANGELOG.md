@@ -4,6 +4,10 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- **Berichte löschen:** einzeln (samt Rohdaten) oder alle auf einmal unter „Berichte“.
+- **Empfehlungen neu beginnen:** Übersicht und Empfehlungen berücksichtigen danach nur Scans ab diesem Zeitpunkt,
+  alle Punkte gelten wieder als „neu“; die Berichte bleiben erhalten. Beides ist während eines laufenden Scans gesperrt
+  und steht im Protokoll.
 - **Schnellscan prüft nur geänderte Dateien:** Nach dem ersten vollständigen Virenscan prüft der tägliche Schnellscan
   alle seither neuen oder geänderten Dateien im ganzen System (maßgeblich ist die vom Dateisystem gesetzte ctime, die
   sich nicht zurückdatieren lässt) – statt nur einiger Ordner und meist in wenigen Minuten. Der Vollscan prüft

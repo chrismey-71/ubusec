@@ -400,3 +400,10 @@ pre.notes { white-space: pre-wrap; font-family: var(--sans); font-size: .95rem; 
 .fix-res.fix-failed, .fix-res.fix-rolledback { color: var(--krit); }
 .fix-lines { font-family: var(--mono); font-size: .82rem; background: var(--code-bg); padding: .4rem .6rem; border-radius: 4px; white-space: pre-wrap; margin: .2rem 0 .5rem; }
 .fixbox form.inline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.btn-danger { background: var(--krit); border-color: var(--krit); color: #fff; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--muted); text-decoration: underline; cursor: pointer; font: inherit; font-size: .85rem; }
+.link-btn:hover { color: var(--krit); }
+td.del { text-align: right; white-space: nowrap; }
+td.del form { margin: 0; }
+.reset-zone { margin-top: 2.5rem; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

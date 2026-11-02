@@ -428,8 +428,18 @@ def ignore_regexes():
     return rx
 
 
+def recs_reset_time():
+    try:
+        return os.path.getmtime(os.path.join(STATE_DIR, "recs-reset"))
+    except OSError:
+        return 0
+
+
 def current_state(reports):
-    """Aktueller Gesamtstand: je Modul die Meldungen aus dem jüngsten Scan, der es geprüft hat."""
+    """Aktueller Gesamtstand: je Modul die Meldungen aus dem jüngsten Scan, der es geprüft hat
+    (nur Scans nach einem „Empfehlungen neu beginnen“)."""
+    reset = recs_reset_time()
+    reports = [r for r in reports if r.get("started", 0) >= reset]
     seen, findings, sources = set(), [], {}
     ign = ignore_regexes()
     for r in reports:
@@ -1013,6 +1023,10 @@ def create_app():
     def f_titles(mods):
         return ", ".join(MOD_TITLE.get(m, m) for m in mods)
 
+    @app.template_global("recs_reset_time")
+    def g_recs_reset_time():
+        return recs_reset_time()
+
     @app.template_global("fix_result")
     def g_fix_result(fid):
         return fix_result(fid)
@@ -1269,7 +1283,57 @@ def create_app():
 
     @app.route("/berichte")
     def reports():
-        return render_template("reports.html", reports=all_reports())
+        return render_template("reports.html", reports=all_reports(), status=read_status())
+
+    def wait_gone(paths, present=False, secs=6):
+        """Kurz warten, bis root den Auftrag erledigt hat (die Steuer-Warteschlange reagiert sofort)."""
+        end = time.time() + secs
+        while time.time() < end:
+            if all(os.path.exists(p) == present for p in paths):
+                return True
+            time.sleep(0.3)
+        return False
+
+    @app.route("/berichte/<rid>/loeschen", methods=["POST"])
+    def report_delete(rid):
+        if not get_report(rid):
+            abort(404)
+        if read_status().get("running"):
+            flash("Während ein Scan läuft, werden keine Berichte gelöscht.", "error")
+            return redirect(url_for("reports"))
+        enqueue_ctl({"action": "delreport", "rid": rid, "user": session["user"]})
+        done = wait_gone([os.path.join(LOG_DIR, "report-%s.json" % rid)])
+        flash("Bericht gelöscht." if done else "Bericht wird gelöscht …", "ok")
+        return redirect(url_for("reports"))
+
+    @app.route("/berichte/alle-loeschen", methods=["POST"])
+    def reports_delete_all():
+        if request.form.get("confirm") != "ja":
+            flash("Bitte bestätige, dass alle Berichte gelöscht werden sollen.", "error")
+            return redirect(url_for("reports"))
+        if read_status().get("running"):
+            flash("Während ein Scan läuft, werden keine Berichte gelöscht.", "error")
+            return redirect(url_for("reports"))
+        paths = report_paths()
+        enqueue_ctl({"action": "delreports", "user": session["user"]})
+        done = wait_gone(paths)
+        flash("Alle Berichte gelöscht. Der nächste Scan baut Übersicht und Empfehlungen neu auf." if done
+              else "Berichte werden gelöscht …", "ok")
+        return redirect(url_for("reports"))
+
+    @app.route("/empfehlungen/zuruecksetzen", methods=["POST"])
+    def recs_reset():
+        if read_status().get("running"):
+            flash("Während ein Scan läuft, lässt sich das nicht zurücksetzen.", "error")
+            return redirect(url_for("recommendations"))
+        before = recs_reset_time()
+        enqueue_ctl({"action": "resetrecs", "user": session["user"]})
+        end = time.time() + 6
+        while time.time() < end and recs_reset_time() <= before:
+            time.sleep(0.3)
+        flash("Empfehlungen zurückgesetzt. Ein Vollscan baut sie jetzt komplett neu auf – die alten Berichte bleiben "
+              "unter „Berichte“ erhalten.", "ok")
+        return redirect(url_for("recommendations"))
 
     @app.route("/berichte/<rid>")
     def report(rid):

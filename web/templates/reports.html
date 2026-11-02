@@ -7,7 +7,7 @@
 {% else %}
 <div class="table-wrap">
 <table class="reports">
-  <thead><tr><th>Zeitpunkt</th><th>Art</th><th>Ausgelöst</th><th>Dauer</th><th>Befunde</th><th class="num">Wert</th></tr></thead>
+  <thead><tr><th>Zeitpunkt</th><th>Art</th><th>Ausgelöst</th><th>Dauer</th><th>Befunde</th><th class="num">Wert</th><th><span class="sr-only">Löschen</span></th></tr></thead>
   <tbody>
   {% for r in reports %}
     <tr>
@@ -17,11 +17,28 @@
       <td>{{ (r.finished - r.started) | dur }}</td>
       <td><span class="mini">{% for s in SEVERITIES if s != 'INFO' and r.counts[s] %}<i class="sev-{{ s|lower }}" title="{{ SEV_NAME[s] }}">{{ r.counts[s] }}</i>{% else %}<span class="muted">keine</span>{% endfor %}</span></td>
       <td class="num">{{ r.score }}</td>
+      <td class="del">
+        <form method="post" action="{{ url_for('report_delete', rid=r.id) }}">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="link-btn" title="Bericht löschen" data-confirm="Bericht vom {{ r.started | dt }} samt Rohdaten löschen?">Löschen</button>
+        </form>
+      </td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
-<p class="muted small">Berichte werden nach der in /etc/ubusec/ubusec.conf eingestellten Frist automatisch gelöscht (Standard: 60 Tage).</p>
+<p class="muted small">Berichte werden nach der in den Einstellungen festgelegten Frist automatisch gelöscht (Standard: 60 Tage).</p>
+<details class="danger-zone">
+  <summary>Alle Berichte löschen</summary>
+  <form method="post" action="{{ url_for('reports_delete_all') }}" class="stack narrow">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p class="small">Löscht alle {{ reports | length }} Berichte samt Rohdaten. Übersicht, Verlauf und Empfehlungen sind danach leer,
+      alle Punkte gelten beim nächsten Scan als „neu“. Ausgeblendete Fehlalarme, Baseline und Einstellungen bleiben erhalten.
+      Wer nur die Empfehlungen frisch aufbauen möchte, nutzt besser „Empfehlungen neu beginnen“ – dann bleiben die Berichte erhalten.</p>
+    <label class="check"><input type="checkbox" name="confirm" value="ja" required> <span>Ja, alle Berichte endgültig löschen.</span></label>
+    <button class="btn btn-danger">Alle Berichte löschen</button>
+  </form>
+</details>
 {% endif %}
 {% endblock %}

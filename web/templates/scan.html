@@ -27,8 +27,9 @@
     <p class="muted small">Ein abgebrochener Scan erzeugt keinen Bericht. Du kannst ihn unten neu starten.</p>
   </section>
 {% else %}
-  <section class="done-box" id="done-box" {% if not status.report %}hidden{% endif %}>
-    {% if status.report %}
+  {% set rep_ok = status.report and last and ('report-' ~ last.id ~ '.json') == status.report %}
+  <section class="done-box" id="done-box" {% if not rep_ok %}hidden{% endif %}>
+    {% if rep_ok %}
       <p>Der letzte Scan ist abgeschlossen{% if last %} ({{ last.finished | ago }}){% endif %}.
       <a href="{{ url_for('report', rid=status.report[7:-5]) }}">Bericht ansehen</a></p>
     {% endif %}

@@ -21,7 +21,10 @@
 </details>
 {% endif %}
 
-{% if not todo %}
+{% set reset_at = recs_reset_time() %}
+{% if not todo and reset_at and not state.sources %}
+  <p class="empty-line">Empfehlungen am {{ reset_at | dt }} zurückgesetzt. <a href="{{ url_for('scan') }}">Vollscan starten</a>, um sie neu aufzubauen.</p>
+{% elif not todo %}
   <p class="ok-line big">Keine offenen Punkte. {% if state.missing %}Noch nicht geprüft: {{ state.missing | titles }}.{% endif %}</p>
 {% else %}
   {{ ui.strip(todo) }}
@@ -69,4 +72,15 @@
   </details>
 </section>
 {% endif %}
+
+<details class="danger-zone reset-zone">
+  <summary>Empfehlungen neu beginnen</summary>
+  <form method="post" action="{{ url_for('recs_reset') }}" class="stack narrow">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p class="small">Übersicht und Empfehlungen berücksichtigen danach nur noch Scans ab jetzt; alle Punkte gelten wieder als
+      „neu“. Der nächste Vollscan baut alles komplett neu auf. Die bisherigen Berichte bleiben unter „Berichte“ erhalten,
+      ausgeblendete Fehlalarme bleiben ausgeblendet.{% if reset_at %} Zuletzt zurückgesetzt: {{ reset_at | dt }}.{% endif %}</p>
+    <button class="btn btn-quiet" data-confirm="Alle Empfehlungen zurücksetzen? Bis zum nächsten Scan sind Übersicht und Empfehlungen leer.">Empfehlungen zurücksetzen</button>
+  </form>
+</details>
 {% endblock %}
