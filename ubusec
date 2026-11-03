@@ -1394,6 +1394,8 @@ mod_web() {
   python3 -I - "$RAW/web-php-uploads.all" >"$RAW/web-php-uploads.class" 2>/dev/null <<'PY2'
 import os, re, sys
 DENY = re.compile(r"(?i)(php_flag\s+engine\s+off|Require all denied|Deny from all|SetHandler\s+none)")
+SUS = re.compile(r"(?i)eval\s*\(|base64_decode|gzinflate|str_rot13|assert\s*\(\s*\$|\b(system|passthru|shell_exec|exec|popen|proc_open)\s*\(|"
+                 r"\$_(GET|POST|REQUEST|COOKIE|FILES)|move_uploaded_file|file_put_contents|fsockopen|curl_exec")
 def head(p, n=4096):
     try:
         with open(p, "rb") as f:
@@ -1416,6 +1418,11 @@ for line in open(sys.argv[1], errors="replace"):
     body = re.sub(r"/\*.*?\*/|//[^\n]*|#[^\n]*|\s", "", t, flags=re.S)
     body = re.sub(r"^<\?php|\?>$", "", body)
     first = next((l.strip() for l in t.splitlines() if l.strip()), "")
+    full = head(p, 1 << 20)
+    # verdächtige Befehle schließen jede „harmlos“-Einordnung aus (z. B. eine Webshell mit Twig-Kopf getarnt)
+    if SUS.search(full):
+        print("UNK\t%s\t%s" % ("gesperrt" if locked(p) else "offen", p))
+        continue
     if os.path.getsize(p) < 200 and not body:
         why = "leerer Platzhalter"
     elif "/wp-content/uploads/mailpoet/cache/" in p and re.search(r"Twig\\\\|Twig\\Template|use Twig", t):
