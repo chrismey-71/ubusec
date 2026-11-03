@@ -1425,7 +1425,7 @@ for line in open(sys.argv[1], errors="replace"):
         continue
     if os.path.getsize(p) < 200 and not body:
         why = "leerer Platzhalter"
-    elif "/wp-content/uploads/mailpoet/cache/" in p and re.search(r"Twig\\\\|Twig\\Template|use Twig", t):
+    elif "/wp-content/uploads/mailpoet/cache/" in p and re.search(r"Twig\\(Environment|Template|Error|Source)|__TwigTemplate_", t):
         why = "MailPoet-Vorlagen-Cache"
     elif re.search(r"/uploads/matomo/config/[^/]+\.ini\.php$", p) and re.search(r"exit|die", first):
         why = "Matomo-Konfiguration (mit Zugriffsschutz)"
