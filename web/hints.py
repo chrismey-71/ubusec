@@ -425,6 +425,13 @@ _H = [
             "stammen, sollte trotzdem klar sein.",
         steps=["„Jetzt prüfen“ zeigt Inhalt und Herkunftshinweise; unbekannte Dateien in die Sicherung verschieben."],
         effort="5 Min")),
+    (r"^web\|\d+ PHP-Testdateien von Anwendungen", dict(
+        why="Automatische Tests einer Anwendung prüfen oft gezielt gefährliche Eingaben – dafür stehen solche Muster als "
+            "Testdaten im Code. Echte Webshells verstecken sich selten in Test-Ordnern, ausgeschlossen ist es aber nicht.",
+        steps=["„Jetzt prüfen“ zeigt die gefundenen Befehle je Datei.",
+               "Wirklich sicher: Datei mit dem Original der Anwendung in derselben Version vergleichen (z. B. auf GitHub).",
+               "Test-Ordner werden im Betrieb nicht gebraucht; viele Anwendungen liefern sie in Produktionspaketen gar nicht aus."],
+        effort="10 Min")),
     (r"^web\|\d+ PHP-Dateien mit typischen Webshell", dict(
         why="Diese Dateien enthalten Muster, die typisch für Webshells (Fernsteuerungen über den Browser) sind. "
             "Einzelne Plugins nutzen ähnlichen Code legitim.",

@@ -4,6 +4,8 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- Webshell-Muster in Testcode von Anwendungen (Ordner Tests/ bzw. tests/, z. B. bei Mautic) werden getrennt und als
+  MITTEL gemeldet statt HOCH; „Jetzt prüfen“ zeigt die gefundenen Befehle.
 - **PHP-Dateien in Upload-Ordnern** genauer: Programmcode-Ordner, die zufällig images/, media/ oder files/ heißen
   (Plugins, Themes, vendor, Nextcloud-Apps, Mautic), zählen nicht mehr; von Plugins erzeugte Dateien (MailPoet-
   Vorlagen-Cache, Matomo-Konfiguration) und Dateien mit Zugriffsschutz in der ersten Zeile werden als harmlos

@@ -272,7 +272,7 @@ def verify_spec(f):
         kind = "ports"
         args = re.findall(r"(?<![\d.])(\d{1,5})/(?:tcp|udp)", msg) or re.findall(r"ports?:\s*([\d ]+)", text)
         args = [a for x in args for a in str(x).split()]
-    elif mod == "web" and re.search(r"PHP-Dateien in Upload|Webshell-Mustern", msg):
+    elif mod == "web" and re.search(r"PHP-Dateien in Upload|Webshell-Mustern|Testdateien von Anwendungen", msg):
         kind, args = "phpscan", [d for d in det if re.fullmatch(r"/[A-Za-z0-9._/@+:-]{1,300}", d)]
     elif mod == "rootkit" and re.search(r"temporären|/dev/shm|versteckte|Hidden|aus gelöschten", text):
         kind = "fileinfo"

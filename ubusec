@@ -1455,8 +1455,15 @@ PY2
     | xargs -0 -r grep -IlsE \
     'eval[[:space:]]*\([[:space:]]*(base64_decode|gzinflate|gzuncompress|str_rot13|strrev)[[:space:]]*\(|assert[[:space:]]*\([[:space:]]*\$_(POST|GET|REQUEST|COOKIE)|(system|passthru|shell_exec|exec|popen|proc_open)[[:space:]]*\([[:space:]]*\$_(GET|POST|REQUEST|COOKIE)|\$_(POST|GET|REQUEST|COOKIE)\[[^]]+\][[:space:]]*\(|FilesMan|c99shell|r57shell|b374k|WSO [0-9]|\$GLOBALS\[.{0,40}\]\[[0-9]+\]\(' \
     2>/dev/null >"$RAW/web-shell-sig.txt"
+  # Treffer in Testcode von Anwendungen (…/Tests/…, …/tests/…) sind fast immer Testdaten – getrennt und milder melden
+  grep -E '/[Tt]ests?/' "$RAW/web-shell-sig.txt" >"$RAW/web-shell-sig-tests.txt"
+  grep -vE '/[Tt]ests?/' "$RAW/web-shell-sig.txt" >"$RAW/web-shell-sig.main.txt"; mv -f "$RAW/web-shell-sig.main.txt" "$RAW/web-shell-sig.txt"
   if [ -s "$RAW/web-shell-sig.txt" ]; then take "$RAW/web-shell-sig.txt" 10
     add HOCH web "$(grep -c . "$RAW/web-shell-sig.txt") PHP-Dateien mit typischen Webshell-Mustern" "${ITEMS[@]}" "Einzeln prüfen – vereinzelt auch in legitimen Plugins"
+  fi
+  if [ -s "$RAW/web-shell-sig-tests.txt" ]; then take "$RAW/web-shell-sig-tests.txt" 10
+    add MITTEL web "$(grep -c . "$RAW/web-shell-sig-tests.txt") PHP-Testdateien von Anwendungen mit Webshell-Mustern (meist Testdaten)" "${ITEMS[@]}" \
+      "Liegen in Test-Ordnern der Anwendung; Testcode enthält solche Muster oft absichtlich – mit „Jetzt prüfen“ ansehen"
   fi
 
   if have maldet; then
