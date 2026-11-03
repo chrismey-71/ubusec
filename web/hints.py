@@ -410,13 +410,21 @@ _H = [
         steps=["$ sudo systemctl restart clamav-freshclam", "$ sudo freshclam"], effort="5 Min")),
 
     # ----------------------------------------------------------------- web ---
-    (r"^web\|PHP-Dateien in Upload", dict(
+    (r"^web\|PHP-Dateien in Upload-/Medienordnern", dict(
         why="In Upload-Ordnern haben PHP-Dateien nichts zu suchen. Angreifer laden dort Webshells über unsichere "
             "Upload-Formulare hoch.",
-        steps=["Datei ansehen und meist löschen.",
-               "PHP-Ausführung im Upload-Ordner sperren (Apache, .htaccess in wp-content/uploads): "
-               "<FilesMatch \"\\.ph(p[0-9]?|tml)$\"> Require all denied </FilesMatch>",
-               "WordPress, Plugins und Themes aktualisieren."], effort="15 Min", alarm=True)),
+        steps=["1. Unten „Jetzt prüfen“: ubusec sucht in jeder Datei nach Webshell-Befehlen und lässt den Virenscanner laufen.",
+               "2. Gehört die Datei erkennbar zu einem Plugin (Pfad wie uploads/<pluginname>/…, harmloser Inhalt)? Dann "
+               "„PHP-Ausführung im Upload-Ordner sperren“ – Plugins lesen solche Dateien intern ein, die Sperre stört sie nicht.",
+               "3. Verdächtig oder unbekannt: „In die Sicherung verschieben“ (lässt sich rückgängig machen), danach Website testen.",
+               "4. Bei einem Treffer: WordPress, Plugins und Themes aktualisieren, Admin-Passwörter ändern, Zugriffsprotokoll "
+               "nach dem Dateinamen durchsuchen: sudo grep '<dateiname>' /var/log/virtualmin/*access_log"],
+        effort="15 Min", alarm=True)),
+    (r"^web\|PHP-Dateien in Upload-Ordnern \(Ausführung per .htaccess gesperrt\)", dict(
+        why="Die PHP-Ausführung ist dort gesperrt – über den Browser lassen sich die Dateien nicht starten. Woher sie "
+            "stammen, sollte trotzdem klar sein.",
+        steps=["„Jetzt prüfen“ zeigt Inhalt und Herkunftshinweise; unbekannte Dateien in die Sicherung verschieben."],
+        effort="5 Min")),
     (r"^web\|\d+ PHP-Dateien mit typischen Webshell", dict(
         why="Diese Dateien enthalten Muster, die typisch für Webshells (Fernsteuerungen über den Browser) sind. "
             "Einzelne Plugins nutzen ähnlichen Code legitim.",

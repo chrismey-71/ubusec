@@ -4,6 +4,12 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- **PHP-Dateien in Upload-Ordnern** genauer: Programmcode-Ordner, die zufällig images/, media/ oder files/ heißen
+  (Plugins, Themes, vendor, Nextcloud-Apps, Mautic), zählen nicht mehr; von Plugins erzeugte Dateien (MailPoet-
+  Vorlagen-Cache, Matomo-Konfiguration) und Dateien mit Zugriffsschutz in der ersten Zeile werden als harmlos
+  erkannt; ist die PHP-Ausführung per .htaccess gesperrt, ist der Befund nur MITTEL.
+  Neu im Befund: „Auf Schadcode prüfen“ (Webshell-Muster und Virenscanner je Datei), „In die Sicherung verschieben“
+  und „PHP-Ausführung im Upload-Ordner sperren“.
 - Neue Korrektur auf Knopfdruck: Sticky-Bit für Verzeichnisse setzen, die für alle beschreibbar sind (z. B.
   /var/fcgiwrap von Virtualmin).
 - **Baseline direkt im Befund übernehmen:** Bei Baseline-Meldungen (z. B. „Neue Benutzerkonten“) steht der Knopf

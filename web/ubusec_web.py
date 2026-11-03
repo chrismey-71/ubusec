@@ -244,6 +244,9 @@ VERIFY_TEXT = {
     "fileinfo": ("Soll ubusec die Dateien für dich ansehen?",
                  "Steckbrief je Datei: Art, Größe, Besitzer, Änderungsdatum, Prüfsumme, zugehöriges Paket und welche "
                  "Prozesse sie gerade nutzen. Ändert nichts am System."),
+    "phpscan": ("Soll ubusec die Dateien auf Schadcode prüfen?",
+                "Untersucht jede Datei auf typische Befehle von Webshells (eval/base64, Ausführen von Eingaben, Upload-Funktionen) "
+                "und prüft sie mit dem Virenscanner. Zeigt außerdem Größe, Besitzer, Datum und die erste Zeile. Ändert nichts."),
     "ports": ("Soll ubusec für dich nachsehen, wer dort lauscht?",
               "Zeigt je Port das Programm, seinen Speicherort, ob es aus einem Ubuntu-Paket stammt und ob es öffentlich "
               "oder nur lokal erreichbar ist. Ändert nichts am System."),
@@ -269,6 +272,8 @@ def verify_spec(f):
         kind = "ports"
         args = re.findall(r"(?<![\d.])(\d{1,5})/(?:tcp|udp)", msg) or re.findall(r"ports?:\s*([\d ]+)", text)
         args = [a for x in args for a in str(x).split()]
+    elif mod == "web" and re.search(r"PHP-Dateien in Upload|Webshell-Mustern", msg):
+        kind, args = "phpscan", [d for d in det if re.fullmatch(r"/[A-Za-z0-9._/@+:-]{1,300}", d)]
     elif mod == "rootkit" and re.search(r"temporären|/dev/shm|versteckte|Hidden|aus gelöschten", text):
         kind = "fileinfo"
         # ubusecs eigene Rohdaten-Listen („… und N weitere“) nicht mitprüfen
@@ -384,6 +389,16 @@ def fix_specs(f, report):
         for d in det:
             if re.fullmatch(r"/(etc/php|home)/[A-Za-z0-9._/-]{1,200}/php\.ini", d):
                 add("php-ini", d)
+    if mod == "web" and "PHP-Dateien in Upload" in msg:
+        ups = []
+        for d in det:
+            if re.fullmatch(r"/[A-Za-z0-9._/@+:-]{1,300}\.(php[0-9]?|phtml)", d):
+                add("quarantine", d)
+                m = re.match(r"^(/.+/wp-content/uploads)/", d)
+                if m and m.group(1) not in ups and "gesperrt" not in msg:
+                    ups.append(m.group(1))
+        for u in ups:
+            add("wp-uploads", u)
     for d in det:
         m = re.match(r"^(?:Datei|Ordner): (/\S+)$", d)
         if m and re.search(r"phpinfo|\.DS_Store|Archive in Plugin|Roundcube: Installer", msg):

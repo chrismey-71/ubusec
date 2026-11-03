@@ -1379,20 +1379,69 @@ mod_web() {
   # Webserver nicht ausgeführt – hier nicht durchsuchen (der Virenscan prüft sie weiterhin)
   local prune=() d
   while IFS= read -r d; do [ -n "$d" ] && prune+=(-path "$d" -o); done < <(nextcloud_datadirs)
+  # Upload-Orte: wp-content/uploads, Drupal sites/*/files, Mautic media/files und allgemein uploads/, images/, files/ –
+  # aber nicht in Programmcode (Plugins, Themes, vendor, Nextcloud-Apps …), wo Ordner zufällig so heißen
   find "${roots[@]}" -xdev \( "${prune[@]}" -false \) -prune -o \
-    \( -path '*/wp-content/uploads/*' -o -path '*/images/*' -o -path '*/media/*' -o -path '*/files/*' \) \
+    \( -path '*/wp-content/uploads/*' -o -path '*/sites/*/files/*' -o -path '*/media/files/*' -o -path '*/uploads/*' \
+       -o -path '*/upload/*' -o -path '*/images/*' -o -path '*/files/*' \) \
+    ! -path '*/wp-content/plugins/*' ! -path '*/wp-content/themes/*' ! -path '*/vendor/*' ! -path '*/node_modules/*' \
+    ! -path '*/apps/*' ! -path '*/custom_apps/*' ! -path '*/apps-extra/*' ! -path '*/core/*' ! -path '*/lib/*' \
+    ! -path '*/src/*' ! -path '*/app/*' ! -path '*/libraries/*' ! -path '*/modules/*' \
     -type f -iname '*.ph*' ! -name '*.phpx' -print 2>/dev/null >"$RAW/web-php-uploads.all"
-  # leere Platzhalter „<?php // Silence is golden“ (verhindern Verzeichnislisten) sind harmlos
-  : >"$RAW/web-php-uploads.txt"
-  while IFS= read -r d; do
-    if [ "$(stat -c %s "$d" 2>/dev/null || echo 999)" -lt 200 ] \
-       && ! tr -d '\r' <"$d" | sed -e 's://.*$::' -e 's:#.*$::' | tr -d ' \n\t' | sed -e 's:/\*.*\*/::g' -e 's/^<?php//' -e 's/?>$//' | grep -q .; then
-      continue
-    fi
-    echo "$d" >>"$RAW/web-php-uploads.txt"
-  done <"$RAW/web-php-uploads.all"
+  # Einordnen: von Plugins erzeugte Dateien (MailPoet-Vorlagen-Cache, Matomo-Konfiguration), leere Platzhalter und
+  # Dateien mit Zugriffsschutz in der ersten Zeile sind harmlos; der Rest wird gemeldet – milder, wenn die
+  # PHP-Ausführung im Upload-Ordner per .htaccess gesperrt ist
+  python3 -I - "$RAW/web-php-uploads.all" >"$RAW/web-php-uploads.class" 2>/dev/null <<'PY2'
+import os, re, sys
+DENY = re.compile(r"(?i)(php_flag\s+engine\s+off|Require all denied|Deny from all|SetHandler\s+none)")
+def head(p, n=4096):
+    try:
+        with open(p, "rb") as f:
+            return f.read(n).decode("utf-8", "replace")
+    except OSError:
+        return ""
+def locked(p):
+    d = os.path.dirname(p)
+    while d and d != "/":
+        h = os.path.join(d, ".htaccess")
+        if os.path.isfile(h) and DENY.search(head(h, 65536)):
+            return True
+        if os.path.basename(d) in ("uploads", "files", "media", "images", "upload"):
+            break
+        d = os.path.dirname(d)
+    return False
+for line in open(sys.argv[1], errors="replace"):
+    p = line.rstrip("\n")
+    t = head(p)
+    body = re.sub(r"/\*.*?\*/|//[^\n]*|#[^\n]*|\s", "", t, flags=re.S)
+    body = re.sub(r"^<\?php|\?>$", "", body)
+    first = next((l.strip() for l in t.splitlines() if l.strip()), "")
+    if os.path.getsize(p) < 200 and not body:
+        why = "leerer Platzhalter"
+    elif "/wp-content/uploads/mailpoet/cache/" in p and re.search(r"Twig\\\\|Twig\\Template|use Twig", t):
+        why = "MailPoet-Vorlagen-Cache"
+    elif re.search(r"/uploads/matomo/config/[^/]+\.ini\.php$", p) and re.search(r"exit|die", first):
+        why = "Matomo-Konfiguration (mit Zugriffsschutz)"
+    elif re.match(r"^(;\s*)?<\?php\s*(exit|die)\b|^<\?php\s*(defined|if)\s*\(\s*!?\s*defined\(\s*['\"]ABSPATH['\"]\s*\)", first):
+        why = "Zugriffsschutz in der ersten Zeile"
+    else:
+        print("UNK\t%s\t%s" % ("gesperrt" if locked(p) else "offen", p))
+        continue
+    print("OK\t%s\t%s" % (why, p))
+PY2
+  grep -P '^UNK\toffen\t' "$RAW/web-php-uploads.class" | cut -f3 >"$RAW/web-php-uploads.txt"
+  grep -P '^UNK\tgesperrt\t' "$RAW/web-php-uploads.class" | cut -f3 >"$RAW/web-php-uploads-locked.txt"
+  grep -P '^OK\t' "$RAW/web-php-uploads.class" | awk -F'\t' '$2 != "leerer Platzhalter" {print $3 " – " $2}' >"$RAW/web-php-uploads-known.txt"
   if [ -s "$RAW/web-php-uploads.txt" ]; then take "$RAW/web-php-uploads.txt" 10
     add HOCH web "PHP-Dateien in Upload-/Medienordnern (häufiges Webshell-Versteck)" "${ITEMS[@]}"
+  fi
+  if [ -s "$RAW/web-php-uploads-locked.txt" ]; then take "$RAW/web-php-uploads-locked.txt" 10
+    add MITTEL web "PHP-Dateien in Upload-Ordnern (Ausführung per .htaccess gesperrt)" "${ITEMS[@]}" \
+      "Über den Webserver nicht aufrufbar; trotzdem prüfen, woher sie stammen"
+  fi
+  if [ -s "$RAW/web-php-uploads-known.txt" ]; then take "$RAW/web-php-uploads-known.txt" 6
+    add INFO web "$(grep -c . "$RAW/web-php-uploads-known.txt") von Plugins erzeugte PHP-Dateien in Upload-Ordnern erkannt (harmlos)" "${ITEMS[@]}" \
+      "z. B. MailPoet legt dort seinen Vorlagen-Cache an, Matomo seine Konfiguration – beide werden nur intern eingelesen"
   fi
 
   find "${roots[@]}" -xdev \( "${prune[@]}" -false \) -prune -o -type f \( -name '*.php' -o -name '*.phtml' -o -name '*.php[0-9]' \) -print0 2>/dev/null \
@@ -2197,7 +2246,7 @@ process_queue() { # process_queue req|ctl
         local vk=${REQ[kind]:-} vid=${REQ[id]:-} va=${REQ[args]:-} vrx a vdir=$STATE_DIR/verify vargs=()
         case $vk in
           binaries) vrx='^[a-z0-9._+-]{1,40}$' ;;
-          pkgfiles|fileinfo) vrx='^/[A-Za-z0-9._/@+:-]{1,300}$' ;;
+          pkgfiles|fileinfo|phpscan) vrx='^/[A-Za-z0-9._/@+:-]{1,300}$' ;;
           ports) vrx='^[0-9]{1,5}$' ;;
           *) audit "ABGELEHNT $user: Prüfart '$vk'"; continue ;;
         esac

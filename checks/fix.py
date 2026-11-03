@@ -349,7 +349,7 @@ def do_php_ini(target, fdir, changes):
     return "%s angepasst, PHP-FPM neu geladen" % p, diff
 
 
-QUARANTINE_OK = re.compile(r"/(phpinfo|info|test)\.php$|/\.DS_Store$|/wp-content/(plugins|themes)/[^/]+/[^/]+\.(zip|tar|tar\.gz|tgz|7z|rar)$|/installer$")
+QUARANTINE_OK = re.compile(r"/(wp-content/uploads|uploads|upload|media/files|sites/[^/]+/files)/(.+/)?[^/]+\.(php[0-9]?|phtml)$|/(phpinfo|info|test)\.php$|/\.DS_Store$|/wp-content/(plugins|themes)/[^/]+/[^/]+\.(zip|tar|tar\.gz|tgz|7z|rar)$|/installer$")
 
 
 def do_quarantine(target, fdir, changes):
@@ -359,7 +359,7 @@ def do_quarantine(target, fdir, changes):
         raise Refuse("Diese Datei verschiebt ubusec nicht automatisch: %s" % p)
     if p.endswith("/installer") and not (os.path.isdir(p) and os.path.isfile(os.path.join(os.path.dirname(p), "program/include/iniset.php"))):
         raise Refuse("Kein Roundcube-Installer-Ordner: %s" % p)
-    if re.search(r"/(phpinfo|info|test)\.php$", p) and "phpinfo" not in read(p).lower():
+    if re.search(r"/(phpinfo|info|test)\.php$", p) and "/uploads/" not in p and "phpinfo" not in read(p).lower():
         raise Refuse("Die Datei enthält kein phpinfo() – bitte selbst ansehen: %s" % p)
     os.makedirs(os.path.join(fdir, "orig"), mode=0o700, exist_ok=True)
     dest = os.path.join(fdir, "orig", "q%d" % len(changes))

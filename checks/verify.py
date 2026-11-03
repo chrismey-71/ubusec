@@ -204,6 +204,56 @@ def ports(nums):
     return rows
 
 
+SHELL_RX = re.compile(r"eval\s*\(\s*(base64_decode|gzinflate|gzuncompress|str_rot13|strrev)\s*\(|assert\s*\(\s*\$_(POST|GET|REQUEST|COOKIE)"
+                      r"|(system|passthru|shell_exec|exec|popen|proc_open)\s*\(\s*\$_(GET|POST|REQUEST|COOKIE)"
+                      r"|\$_(POST|GET|REQUEST|COOKIE)\[[^]]+\]\s*\(|FilesMan|c99shell|r57shell|b374k|WSO [0-9]"
+                      r"|\$GLOBALS\[.{0,40}\]\[[0-9]+\]\(|move_uploaded_file\s*\(|file_put_contents\s*\([^;]{0,80}\$_(GET|POST|REQUEST)", re.I)
+
+
+def phpscan(paths):
+    """PHP-Dateien auf Schadcode prüfen: typische Webshell-Muster und Virenscanner."""
+    rows, files = [], [p for p in paths if os.path.isfile(p)]
+    clam = {}
+    if files:
+        if shutil.which("clamdscan"):
+            rc, out = run(["clamdscan", "--fdpass", "--no-summary"] + files, 300)
+        elif shutil.which("clamscan"):
+            rc, out = run(["nice", "-n", "19", "clamscan", "--no-summary"] + files, 600)
+        else:
+            out = ""
+        for line in out.splitlines():
+            m = re.match(r"^(.*): (.+) FOUND$", line)
+            if m:
+                clam[m.group(1)] = m.group(2)
+    for p in paths:
+        if not os.path.isfile(p):
+            rows.append({"item": p, "result": "existiert nicht (mehr)", "state": "info"})
+            continue
+        try:
+            with open(p, "rb") as f:
+                txt = f.read(1 << 20).decode("utf-8", "replace")
+        except OSError:
+            txt = ""
+        st = os.stat(p)
+        try:
+            own = pwd.getpwuid(st.st_uid).pw_name
+        except KeyError:
+            own = str(st.st_uid)
+        first = next((l.strip() for l in txt.splitlines() if l.strip()), "")[:70]
+        hits = sorted(set(m.group(0)[:40] for m in SHELL_RX.finditer(txt)))[:3]
+        info = "%d Bytes, Besitzer %s, geändert %s; erste Zeile: %s" % (
+            st.st_size, own, time.strftime("%d.%m.%Y %H:%M", time.localtime(st.st_mtime)), first or "(leer)")
+        if p in clam:
+            rows.append({"item": p, "result": "VIRENSCANNER: %s – %s" % (clam[p], info), "state": "bad"})
+        elif hits:
+            rows.append({"item": p, "result": "verdächtige Befehle: %s – %s" % (", ".join(hits), info), "state": "bad"})
+        elif re.search(r"base64_decode|gzinflate|eval\s*\(|\\x[0-9a-f]{2}\\x[0-9a-f]{2}\\x", txt, re.I):
+            rows.append({"item": p, "result": "enthält verschleierten Code (eval/base64) – genauer ansehen – " + info, "state": "warn"})
+        else:
+            rows.append({"item": p, "result": "keine Schadcode-Muster gefunden – " + info, "state": "ok"})
+    return rows
+
+
 def main():
     if len(sys.argv) < 4:
         sys.exit(2)
@@ -221,6 +271,8 @@ def main():
         rows = compare([a for a in args if PATH_RX.match(a) and "/../" not in a])
     elif kind == "fileinfo":
         rows = fileinfo([a for a in args if PATH_RX.match(a) and "/../" not in a])
+    elif kind == "phpscan":
+        rows = phpscan([a for a in args if PATH_RX.match(a) and "/../" not in a])
     elif kind == "ports":
         rows = ports([a for a in args if PORT_RX.match(a)])
     else:
