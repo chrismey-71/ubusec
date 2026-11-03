@@ -369,7 +369,26 @@ def do_quarantine(target, fdir, changes):
     return "%s in die Sicherung von ubusec verschoben (%s)" % (p, dest), ["- " + p]
 
 
-ACTIONS = {"wp-chmod": do_wp_chmod, "wp-fileedit": do_wp_fileedit, "wp-uploads": do_wp_uploads,
+def do_sticky(target, fdir, changes):
+    """Sticky-Bit für einen für alle beschreibbaren Ordner: Schreiben bleibt erlaubt, aber nur der Besitzer
+    einer Datei darf sie löschen oder umbenennen (wie bei /tmp)."""
+    if not re.fullmatch(r"/[A-Za-z0-9._/@+:-]{1,300}", target) or "/../" in target or \
+            target.rstrip("/") in ("", "/proc", "/sys", "/dev") or target.startswith(("/proc/", "/sys/")):
+        raise Refuse("Pfad nicht zulässig: %s" % target)
+    p = os.path.realpath(target)
+    if not os.path.isdir(p) or os.path.islink(target):
+        raise Refuse("Kein Ordner: %s" % target)
+    m = stat.S_IMODE(os.stat(p).st_mode)
+    if m & 0o1000:
+        return "Sticky-Bit ist bereits gesetzt – nichts zu tun.", []
+    if not m & 0o002:
+        return "Ordner ist nicht für alle beschreibbar – nichts zu tun.", []
+    changes.append({"file": p, "chmod_only": True, "mode": m})
+    os.chmod(p, m | 0o1000)
+    return "Sticky-Bit für %s gesetzt (%o → %o)" % (p, m, m | 0o1000), ["chmod +t " + p]
+
+
+ACTIONS = {"wp-chmod": do_wp_chmod, "sticky": do_sticky, "wp-fileedit": do_wp_fileedit, "wp-uploads": do_wp_uploads,
            "wp-xmlrpc": do_wp_xmlrpc, "svc-rpcbind": do_svc_rpcbind, "sysctl": do_sysctl, "ssh-safe": do_ssh_safe,
            "postfix-banner": do_postfix_banner, "bind-version": do_bind_version, "php-ini": do_php_ini,
            "quarantine": do_quarantine}

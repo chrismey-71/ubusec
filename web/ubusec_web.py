@@ -325,6 +325,9 @@ FIX_TEXT = {
     "quarantine": ("In die Sicherung verschieben",
                    "Verschiebt {t} aus dem Webverzeichnis in die Sicherung von ubusec. „Rückgängig machen“ legt die "
                    "Datei unverändert zurück."),
+    "sticky": ("Sticky-Bit setzen",
+               "Setzt für {t} das Sticky-Bit (chmod +t, wie bei /tmp): Alle dürfen dort weiter Dateien anlegen, aber nur der "
+               "jeweilige Besitzer darf sie löschen oder umbenennen. Laufende Dienste merken davon nichts."),
     "svc-rpcbind": ("rpcbind abschalten",
                     "Stoppt rpcbind und startet es nicht mehr beim Hochfahren. ubusec prüft vorher, dass kein NFS genutzt "
                     "wird, und bricht sonst ab."),
@@ -365,6 +368,10 @@ def fix_specs(f, report):
             add("wp-xmlrpc", m.group(2), m.group(1))
     if mod == "firewall" and re.search(r"(^|\s|: )111/(tcp|udp)\(rpcbind\)", msg):
         add("svc-rpcbind", "rpcbind")
+    if mod == "perms" and "Verzeichnisse für alle beschreibbar ohne Sticky-Bit" in msg:
+        for d in det:
+            if re.fullmatch(r"/[A-Za-z0-9._/@+:-]{1,300}", d):
+                add("sticky", d)
     if mod == "config" and "Kernel-Parameter (sysctl) nicht gehärtet" in msg:
         add("sysctl", "kernel")
     if mod == "config" and re.match(r"SSH: (X11Forwarding aktiv|MaxAuthTries)", msg):
@@ -382,7 +389,8 @@ def fix_specs(f, report):
         if m and re.search(r"phpinfo|\.DS_Store|Archive in Plugin|Roundcube: Installer", msg):
             add("quarantine", m.group(1))
     for x in out:
-        if not re.fullmatch(r"/(home|var/www|srv|etc/php)/[A-Za-z0-9._/@+:-]{1,300}|rpcbind|kernel|sshd|postfix|bind", x["target"]):
+        if not (re.fullmatch(r"/(home|var/www|srv|etc/php)/[A-Za-z0-9._/@+:-]{1,300}|rpcbind|kernel|sshd|postfix|bind", x["target"])
+                or (x["kind"] == "sticky" and re.fullmatch(r"/[A-Za-z0-9._/@+:-]{1,300}", x["target"]))):
             x["blocked"] = True   # Pfad mit Sonderzeichen – nur von Hand
     return [x for x in out if not x.get("blocked")]
 

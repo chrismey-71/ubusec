@@ -216,7 +216,9 @@ _H = [
     (r"^perms\|\d+ Verzeichnisse für alle beschreibbar", dict(
         why="In solchen Ordnern kann jeder Dateien anderer löschen oder austauschen.",
         steps=["Schreibrecht entziehen: sudo chmod o-w <ordner>",
-               "Oder, falls gemeinsam genutzt (wie /tmp): sudo chmod +t <ordner>"], effort="15 Min")),
+               "Oder, falls gemeinsam genutzt (wie /tmp): sudo chmod +t <ordner>",
+               "Virtualmin legt /var/fcgiwrap (Sockets für CGI-Skripte der Domains) für alle beschreibbar an – dort reicht "
+               "das Sticky-Bit: sudo chmod +t /var/fcgiwrap"], effort="5 Min")),
     (r"^perms\|\d+ Dateien ohne gültigen Besitzer", dict(
         why="Meist Reste gelöschter Benutzer. Ein neu angelegter Benutzer mit derselben ID würde sie automatisch besitzen.",
         steps=["Liste prüfen; nicht mehr benötigte Dateien löschen, sonst: sudo chown root:root <datei>"],

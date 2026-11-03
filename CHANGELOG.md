@@ -4,6 +4,8 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- Neue Korrektur auf Knopfdruck: Sticky-Bit für Verzeichnisse setzen, die für alle beschreibbar sind (z. B.
+  /var/fcgiwrap von Virtualmin).
 - **Baseline direkt im Befund übernehmen:** Bei Baseline-Meldungen (z. B. „Neue Benutzerkonten“) steht der Knopf
   „Baseline übernehmen“ jetzt im Befund selbst; danach prüft ubusec den Bereich „Baseline“ sofort neu, sodass die
   Meldungen gleich verschwinden.
