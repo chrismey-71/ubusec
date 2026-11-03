@@ -1417,9 +1417,15 @@ def create_app():
             flash("Bitte bestätige, dass du die Änderungen geprüft hast.", "error")
             return redirect(request.referrer or url_for("recommendations"))
         enqueue_ctl({"action": "accept", "user": session["user"]})
-        flash("Der aktuelle Zustand wird als neue Baseline übernommen. Beim nächsten Scan entfallen die "
-              "Baseline-Meldungen.", "ok")
-        return redirect(url_for("recommendations"))
+        # gleich danach den Bereich „Baseline“ neu prüfen, damit die Meldungen sofort verschwinden
+        st = read_status()
+        if not st.get("running") and not st.get("queued"):
+            flash("Der aktuelle Zustand wird als neue Baseline übernommen; der Bereich „Baseline“ wird gleich neu geprüft – "
+                  "danach verschwinden die Meldungen.", "ok")
+        else:
+            flash("Der aktuelle Zustand wird als neue Baseline übernommen. Beim nächsten Scan entfallen die "
+                  "Baseline-Meldungen.", "ok")
+        return redirect(request.referrer or url_for("recommendations"))
 
     @app.route("/ignorieren", methods=["POST"])
     def ignore():

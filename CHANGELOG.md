@@ -4,6 +4,9 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- **Baseline direkt im Befund übernehmen:** Bei Baseline-Meldungen (z. B. „Neue Benutzerkonten“) steht der Knopf
+  „Baseline übernehmen“ jetzt im Befund selbst; danach prüft ubusec den Bereich „Baseline“ sofort neu, sodass die
+  Meldungen gleich verschwinden.
 - Fehlalarm behoben: .pem-Dateien gelten nur noch als Zugangsdaten, wenn sie einen privaten Schlüssel enthalten
   (z. B. ist cacert.pem von UpdraftPlus nur die öffentliche Liste der Zertifizierungsstellen).
 - **Berichte löschen:** einzeln (samt Rohdaten) oder alle auf einmal unter „Berichte“.

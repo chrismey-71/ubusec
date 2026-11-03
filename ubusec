@@ -2121,7 +2121,12 @@ process_queue() { # process_queue req|ctl
     case $action in
       accept)
         audit "BASELINE übernommen durch $user"
-        "$SELF_PATH" --accept >/dev/null 2>&1 ;;
+        "$SELF_PATH" --accept >/dev/null 2>&1
+        # danach den Bereich „Baseline“ neu prüfen lassen, damit die Meldungen sofort verschwinden
+        if ! grep -q '"running":true' "$STATE_DIR/status.json" 2>/dev/null; then
+          local bq; bq="$QUEUE_DIR/$(date +%s)-baseline"
+          printf 'action=scan\nmode=quick\nonly=baseline\nuser=%s\n' "$user" >"$bq.tmp" && mv -f "$bq.tmp" "$bq.req"
+        fi ;;
       ignore|unignore)
         local pattern=${REQ[pattern]:-}
         if [ ${#pattern} -lt 3 ] || [ ${#pattern} -gt 300 ] || [[ $pattern =~ [[:cntrl:]] ]]; then

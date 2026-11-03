@@ -288,12 +288,14 @@ _H = [
     (r"^integrity\|AIDE:", dict(
         why="AIDE hat Dateiänderungen gegenüber dem gespeicherten Stand festgestellt.",
         steps=["Änderungsliste im AIDE-Log prüfen (Link in den Details).",
-               "Wenn alle Änderungen erklärbar sind (Updates, eigene Arbeit): Baseline übernehmen."], effort="prüfen")),
+               "Wenn alle Änderungen erklärbar sind (Updates, eigene Arbeit): unten auf „Baseline übernehmen“ klicken "
+               "(oder sudo ubusec --accept)."], effort="prüfen")),
 
     # ------------------------------------------------------------ baseline ---
     (r"^baseline\|Neue Benutzerkonten", dict(
         why="Angreifer legen gern eigene Konten an, um wiederzukommen.",
-        steps=["Hast du (oder Virtualmin beim Anlegen einer Domain) dieses Konto erstellt? Dann Baseline übernehmen.",
+        steps=["Hast du (oder Virtualmin beim Anlegen einer Domain) dieses Konto erstellt? Dann unten auf „Baseline übernehmen“ "
+               "klicken (oder auf dem Server: sudo ubusec --accept).",
                "Unbekannt: sperren mit sudo usermod -L -e 1 <name>, Anmeldungen prüfen mit last <name>"],
         effort="prüfen", alarm=True)),
     (r"^baseline\|Neue sudo-Regeln", dict(

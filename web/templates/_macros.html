@@ -42,6 +42,19 @@
       </ol>
     </div>
     {% endif %}
+    {% if f.module == 'baseline' and actions and f.severity != 'INFO' %}
+    <div class="fixbox">
+      <h4>Änderung war beabsichtigt?</h4>
+      <p class="small">Dann übernimm den aktuellen Zustand als neue Baseline. Das gilt für <b>alle</b> Baseline-Meldungen
+        (Benutzer, sudo-Regeln, SSH-Schlüssel, Ports, Cronjobs, Dienste, SUID-Dateien) – prüfe also vorher alle.
+        Danach meldet ubusec nur noch Änderungen ab jetzt.</p>
+      <form method="post" action="{{ url_for('accept_baseline') }}" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <label class="check"><input type="checkbox" name="confirm" value="ja" required> <span>Ich habe alle Baseline-Meldungen geprüft, sie sind beabsichtigt.</span></label>
+        <button class="btn">Baseline übernehmen</button>
+      </form>
+    </div>
+    {% endif %}
     {% if f.verify and actions %}
     {% set v = f.verify %}{% set vr = verify_result(v.id) %}{% set res = vr[0] %}{% set pending = vr[1] %}
     <div class="verify" data-vid="{{ v.id }}" data-pending="{{ 1 if pending else 0 }}">
