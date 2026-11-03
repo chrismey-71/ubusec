@@ -271,7 +271,8 @@ def verify_spec(f):
         args = [a for x in args for a in str(x).split()]
     elif mod == "rootkit" and re.search(r"temporären|/dev/shm|versteckte|Hidden|aus gelöschten", text):
         kind = "fileinfo"
-        args = [m.rstrip(":") for m in _PATH_TOKEN.findall(text)]
+        # ubusecs eigene Rohdaten-Listen („… und N weitere“) nicht mitprüfen
+        args = [m.rstrip(":") for m in _PATH_TOKEN.findall(text) if not m.startswith((LOG_DIR + "/", STATE_DIR + "/"))]
     args = list(dict.fromkeys(a for a in args if a))[:20]
     if not kind or not args:
         return None
