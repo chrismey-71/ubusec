@@ -1686,14 +1686,20 @@ def create_app():
     def tools_action(aktion):
         actions = {"pruefen": ("toolscheck", "Die Werkzeuge werden geprüft …"),
                    "aktualisieren": ("toolsupdate", "Die Werkzeuge werden aktualisiert. Das kann einige Minuten dauern …"),
-                   "lynis": ("lynisrepo", "Die Paketquelle des Herstellers wird eingerichtet und Lynis aktualisiert …")}
+                   "lynis": ("lynisrepo", "Die Paketquelle des Herstellers wird eingerichtet und Lynis aktualisiert …"),
+                   "aide-installieren": ("toolinstall", "AIDE wird installiert; danach wird die Datenbank im Hintergrund angelegt …"),
+                   "maldet-installieren": ("toolinstall", "Linux Malware Detect wird heruntergeladen und installiert …"),
+                   "aide-einrichten": ("aideinit", "Die AIDE-Datenbank wird im Hintergrund angelegt – das kann bis zu einer Stunde dauern …")}
         if aktion not in actions:
             abort(404)
         st = read_status()
         if aktion != "pruefen" and st.get("running"):
             flash("Während ein Scan läuft, werden keine Werkzeuge aktualisiert. Bitte warten oder den Scan abbrechen.", "error")
             return redirect(url_for("tools"))
-        enqueue_ctl({"action": actions[aktion][0], "user": session["user"]})
+        req = {"action": actions[aktion][0], "user": session["user"]}
+        if aktion.endswith("-installieren"):
+            req["tool"] = aktion.split("-")[0]
+        enqueue_ctl(req)
         flash(actions[aktion][1], "ok")
         return redirect(url_for("tools"))
 

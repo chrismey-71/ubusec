@@ -4,6 +4,11 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- **AIDE und Linux Malware Detect per Knopfdruck:** Die Seite „Werkzeuge“ erklärt Nutzen und Aufwand und bietet
+  „installieren“ bzw. „einrichten“ an. AIDE bekommt Ausnahmen für große Datenordner (Nextcloud-Daten, Postfächer,
+  Datenbanken, Protokolle, Sicherungen) und legt seine Datenbank im Hintergrund mit niedriger Priorität an; geprüft
+  wird beim Vollscan. Linux Malware Detect wird von rfxn.com installiert und so eingestellt, dass es keinen eigenen
+  täglichen Scan startet, nichts automatisch in Quarantäne verschiebt und Nextcloud-Daten auslässt.
 - Webshell-Muster in Testcode von Anwendungen (Ordner Tests/ bzw. tests/, z. B. bei Mautic) werden getrennt und als
   MITTEL gemeldet statt HOCH; „Jetzt prüfen“ zeigt die gefundenen Befehle.
 - **PHP-Dateien in Upload-Ordnern** genauer: Programmcode-Ordner, die zufällig images/, media/ oder files/ heißen

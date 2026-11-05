@@ -656,7 +656,11 @@ mod_integrity() {
 
   if have aide; then
     local db=/var/lib/aide/aide.db rc
-    if [ -f "$db" ]; then
+    if [ -f "$STATE_DIR/aide-init.running" ] && kill -0 "$(cat "$STATE_DIR/aide-init.running" 2>/dev/null)" 2>/dev/null; then
+      add INFO integrity "AIDE legt gerade seine Datenbank an – die Prüfung beginnt mit dem nächsten Vollscan danach"
+    elif [ -f "$db" ] && [ "$MODE" != full ] && [ "${AIDE_QUICK:-0}" != 1 ]; then
+      add INFO integrity "AIDE prüft beim Vollscan (dauert auf großen Servern länger; für den Schnellscan: AIDE_QUICK=1)"
+    elif [ -f "$db" ]; then
       aide --config=/etc/aide/aide.conf --check >"$RAW/aide.txt" 2>&1; rc=$?
       if (( rc >= 1 && rc <= 7 )); then
         add MITTEL integrity "AIDE: $(grep -E '^\s*(Added|Removed|Changed) entries' "$RAW/aide.txt" | awk -F: '{gsub(/ entries/,"",$1);gsub(/^[ \t]+/,"",$1);gsub(/[ \t]/,"",$2);printf "%s %s, ",$2,$1}' | sed 's/, $//') seit AIDE-Baseline" \
@@ -665,7 +669,7 @@ mod_integrity() {
         add NIEDRIG integrity "AIDE-Prüfung fehlgeschlagen (Code $rc)" "Log: $RAW/aide.txt"
       fi
     else
-      add INFO integrity "AIDE installiert, aber keine Datenbank – Initialisieren mit: ubusec --init-baseline"
+      add INFO integrity "AIDE installiert, aber keine Datenbank – in der Weboberfläche unter Werkzeuge „AIDE einrichten“ oder: sudo ubusec --init-baseline"
     fi
   fi
 }
@@ -1475,7 +1479,7 @@ PY2
     if [ "${hits:-0}" -gt 0 ]; then add KRITISCH web "Linux Malware Detect: $hits Funde" "Bericht: $rep"
     else add INFO web "Linux Malware Detect: keine Funde"; fi
   else
-    add INFO web "Tipp: Linux Malware Detect (maldet) erkennt Web-Malware besser als ClamAV allein" "https://www.rfxn.com/projects/linux-malware-detect/"
+    add INFO web "Tipp: Linux Malware Detect (maldet) erkennt Web-Malware besser als ClamAV allein" "Installieren: Weboberfläche → Werkzeuge → „Linux Malware Detect installieren“"
   fi
 }
 
@@ -1890,6 +1894,89 @@ tools_state() { # tools_state true|false aktion
   chgrp "$(grp)" "$f.tmp"; chmod 640 "$f.tmp"; mv -f "$f.tmp" "$f"
 }
 
+# ---------------------------------------------------------------- optionale Werkzeuge ---
+# AIDE: Dateiintegrität für das ganze System (auch Konfigurationen und Programme außerhalb von Paketen).
+# Große, sich ständig ändernde Datenordner werden ausgenommen, damit Datenbank und Prüfung überschaubar bleiben.
+aide_excludes() {
+  local d f=/etc/aide/aide.conf.d/99_ubusec_excludes
+  [ -d /etc/aide/aide.conf.d ] || return 0
+  {
+    echo "# von ubusec – große oder sich ständig ändernde Datenordner nicht überwachen"
+    for d in /var/lib/mysql /var/lib/postgresql /var/lib/docker /var/lib/containerd /var/lib/clamav /var/lib/ubusec \
+             /var/log /var/cache /var/spool /var/tmp /tmp /swapfile /var/lib/php/sessions /var/webmin "$LOG_DIR"; do echo "!$d"; done
+    echo '!/home/[^/]+/(Maildir|homes|tmp|logs|backup|backups)(/|$)'
+    echo '!/home/[^/]+/domains/[^/]+/(logs|tmp)(/|$)'
+    nextcloud_datadirs | sed 's/^/!/'
+    backup_dirs | sed 's/^/!/'
+  } >"$f.tmp"
+  chmod 644 "$f.tmp"; mv -f "$f.tmp" "$f"
+}
+aide_init_bg() { # Datenbank im Hintergrund anlegen (kann auf großen Servern lange dauern)
+  local cmd="aideinit -y -f >$LOG_DIR/aide-init.log 2>&1; [ -f /var/lib/aide/aide.db.new ] && cp /var/lib/aide/aide.db.new /var/lib/aide/aide.db; rm -f $STATE_DIR/aide-init.running"
+  if have systemd-run; then
+    systemctl reset-failed ubusec-aide-init.service 2>/dev/null
+    systemd-run --unit=ubusec-aide-init --quiet -p Nice=19 -p IOSchedulingClass=idle -p CPUWeight=20 \
+      -p MemoryMax="$(scan_mem_limit_mb)M" /bin/bash -c "echo \$\$ >$STATE_DIR/aide-init.running; $cmd"
+  else
+    nohup /bin/bash -c "echo \$\$ >$STATE_DIR/aide-init.running; $cmd" >/dev/null 2>&1 &
+  fi
+}
+MALDET_URL=https://www.rfxn.com/downloads/maldet-current.tar.gz
+install_optional() { # install_optional aide|maldet
+  local tool=$1 log=$STATE_DIR/tools-update.log rc=0 ok=0
+  ensure_dirs; tools_state true "install-$tool"
+  {
+    echo "=== $tool installieren – $(date '+%d.%m.%Y %H:%M')"
+    export DEBIAN_FRONTEND=noninteractive
+    case $tool in
+      aide)
+        apt-get install -y -q aide aide-common || false
+        if have aide; then
+          aide_excludes
+          echo "Ausnahmen: /etc/aide/aide.conf.d/99_ubusec_excludes"
+          echo "AIDE-Datenbank wird im Hintergrund angelegt (Protokoll: $LOG_DIR/aide-init.log) – das kann je nach"
+          echo "Datenmenge 10 bis 60 Minuten dauern. Danach prüft jeder Vollscan auf veränderte Dateien."
+          aide_init_bg
+          echo "=== fertig"; ok=1
+        fi ;;
+      maldet)
+        local tmp; tmp=$(mktemp -d "$STATE_DIR/work/maldet.XXXXXX")
+        if curl -fsSL --max-time 120 -o "$tmp/maldet.tgz" "$MALDET_URL" && tar -xzf "$tmp/maldet.tgz" -C "$tmp" \
+           && d=$(dirname "$(find "$tmp" -maxdepth 2 -name install.sh | head -1)") && [ -f "$d/install.sh" ]; then
+          echo "Heruntergeladen: $MALDET_URL ($(sha256sum "$tmp/maldet.tgz" | cut -c1-16)…)"
+          (cd "$d" && ./install.sh) | tail -5
+          local conf=/usr/local/maldetect/conf.maldet
+          if [ -f "$conf" ]; then
+            # ubusec ruft maldet selbst auf: kein eigener täglicher Scan, keine Mails, nichts automatisch in Quarantäne;
+            # Signaturen und Programm aktualisiert maldet weiter selbst (mit Prüfsummen-Abgleich)
+            local kv k
+            for kv in cron_daily_scan=0 email_alert=0 quarantine_hits=0 scan_clamscan=auto autoupdate_signatures=1 \
+                      autoupdate_version=1 autoupdate_version_hashed=1; do
+              k=${kv%%=*}
+              if grep -q "^$k=" "$conf"; then sed -i "s|^$k=.*|$k=\"${kv#*=}\"|" "$conf"; else echo "$k=\"${kv#*=}\"" >>"$conf"; fi
+            done
+            { nextcloud_datadirs; backup_dirs; } >>/usr/local/maldetect/ignore_paths 2>/dev/null
+            sort -u -o /usr/local/maldetect/ignore_paths /usr/local/maldetect/ignore_paths 2>/dev/null
+            maldet -u 2>&1 | tail -2
+            echo "--- installiert: $(maldet 2>/dev/null | head -1)"
+            echo "=== fertig"; ok=1
+          else
+            echo "Installation fehlgeschlagen"; false
+          fi
+        else
+          echo "Download von $MALDET_URL fehlgeschlagen"; false
+        fi
+        rm -rf "$tmp" ;;
+    esac
+    [ $ok = 1 ]
+  } >"$log" 2>&1 || rc=1
+  [ $rc = 0 ] || echo "=== FEHLER – siehe oben" >>"$log"
+  chgrp "$(grp)" "$log"; chmod 640 "$log"
+  check_tools >/dev/null
+  tools_state false "install-$tool"
+  return $rc
+}
+
 check_tools() { # nur die Werkzeuge prüfen, ohne Bericht
   ensure_dirs
   (
@@ -2255,6 +2342,13 @@ process_queue() { # process_queue req|ctl
         audit "WERKZEUGE AKTUALISIEREN $user"; update_tools ;;
       lynisrepo)
         audit "LYNIS-PAKETQUELLE $user"; lynis_upstream || audit "LYNIS-PAKETQUELLE fehlgeschlagen" ;;
+      toolinstall)
+        local tool=${REQ[tool]:-}
+        [[ $tool =~ ^(aide|maldet)$ ]] || { audit "ABGELEHNT $user: Werkzeug '$tool'"; continue; }
+        audit "WERKZEUG INSTALLIEREN $user: $tool"; install_optional "$tool" || audit "WERKZEUG INSTALLIEREN fehlgeschlagen: $tool" ;;
+      aideinit)
+        have aide || { audit "ABGELEHNT $user: AIDE fehlt"; continue; }
+        audit "AIDE EINRICHTEN $user"; aide_excludes; aide_init_bg ;;
       verify)
         # Nachprüfung auf Knopfdruck (nur lesend): Art und Argumente streng prüfen
         local vk=${REQ[kind]:-} vid=${REQ[id]:-} va=${REQ[args]:-} vrx a vdir=$STATE_DIR/verify vargs=()

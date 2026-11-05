@@ -1259,6 +1259,37 @@ def mod_tools(raw, full):
             add("NIEDRIG", "CVE-Daten (Ubuntu OVAL) älter als 2 Tage",
                 "Stand: vor %s Tagen – erreicht der Server security-metadata.canonical.com?" % a)
 
+    # --- optionale Werkzeuge ---------------------------------------------------------
+    sd = os.environ.get("STATE_DIR", "/var/lib/ubusec")
+    r = row["AIDE"]
+    r["benefit"] = ("Überwacht alle Systemdateien – auch Konfigurationen und Programme, die zu keinem Paket gehören – und "
+                    "meldet jede Änderung seit der letzten Freigabe. Ergänzt die Paketprüfung (dpkg), die nur Paketdateien kennt.")
+    r["cost"] = "Datenbank anlegen 10–60 Minuten einmalig; prüft beim Vollscan; nach Updates „Baseline übernehmen“."
+    if r["present"]:
+        db = "/var/lib/aide/aide.db"
+        try:
+            pid = int(open(os.path.join(sd, "aide-init.running")).read().strip())
+            os.kill(pid, 0)
+            r["aide_init"] = True
+        except (OSError, ValueError):
+            r["aide_init"] = False
+        r["aide_db"] = os.path.isfile(db)
+        r["data"], r["data_age"] = "Datenbank (Baseline)", age_days([db]) if os.path.isfile(db) else None
+        if r["aide_init"]:
+            r["note"] = "Datenbank wird gerade angelegt …"
+        elif not r["aide_db"]:
+            r["state"], r["note"] = "veraltet", "noch keine Datenbank – „AIDE einrichten“"
+    r = row["Linux Malware Detect"]
+    r["benefit"] = ("Eigene Signaturen für Web-Malware (PHP-Webshells, eingeschleustes JavaScript, Spam-Skripte), die ClamAV oft "
+                    "nicht kennt. Nutzt den laufenden ClamAV-Dienst als Suchmaschine mit.")
+    r["cost"] = "Wird von rfxn.com geladen (nicht aus den Ubuntu-Paketquellen) und aktualisiert sich selbst; prüft die Webordner."
+    if shutil_which("maldet") or os.path.exists("/usr/local/maldetect/maldet"):
+        r["present"], r["state"] = True, "ok"
+        rc, out, _ = run(["/usr/local/maldetect/maldet"], timeout=20)
+        m = re.search(r"v(\d+[\d.]*)", out)
+        r["installed"] = m.group(1) if m else "installiert"
+        r["data"], r["data_age"] = "Signaturen", age_days(glob.glob("/usr/local/maldetect/sigs/*"))
+
     # --- Lynis: Ubuntu-Paket oft weit hinter dem Hersteller ------------------------
     r = row["Lynis"]
     rel = get_json("https://api.github.com/repos/CISOfy/lynis/releases/latest", "gh-lynis-latest", 43200)

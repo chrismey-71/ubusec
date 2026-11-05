@@ -7,7 +7,7 @@
 
 {% if upd.running or status.ctl_pending %}
 <p class="flash flash-info" id="ctl-pending" data-pending="1">
-  {{ {'update': 'Die Werkzeuge werden aktualisiert', 'lynis': 'Die Lynis-Paketquelle wird eingerichtet'}.get(upd.action, 'Die Werkzeuge werden geprüft') }} … die Seite aktualisiert sich von selbst.</p>
+  {{ {'update': 'Die Werkzeuge werden aktualisiert', 'lynis': 'Die Lynis-Paketquelle wird eingerichtet', 'install-aide': 'AIDE wird installiert', 'install-maldet': 'Linux Malware Detect wird installiert'}.get(upd.action, 'Die Werkzeuge werden geprüft') }} … die Seite aktualisiert sich von selbst.</p>
 {% endif %}
 
 {% if not tools %}
@@ -26,8 +26,21 @@
         {% if t.upstream %}<br><span class="muted small">Hersteller: {{ t.upstream }}{% if t.upstream_repo %} (Quelle eingerichtet){% endif %}</span>{% endif %}</td>
     <td>{% if t.data %}{{ t.data }}<br><span class="muted small">{% if t.data_age is none %}keine Daten{% elif t.data_age < 1 %}heute aktualisiert{% else %}vor {{ t.data_age | round(0, 'floor') | int }} Tagen{% endif %}</span>{% else %}<span class="muted">–</span>{% endif %}
         {% if t.note %}<br><span class="muted small">{{ t.note }}</span>{% endif %}</td>
-    <td><span class="tstate">{{ {'ok': 'aktuell', 'update': 'Update verfügbar', 'veraltet': 'veraltet', 'fehlt': 'nicht installiert'}[st] }}</span></td>
+    <td><span class="tstate">{{ {'ok': 'aktuell', 'update': 'Update verfügbar', 'veraltet': 'veraltet', 'fehlt': 'nicht installiert'}[st] if not (t.name == 'AIDE' and t.present and not t.aide_db) else ('wird eingerichtet' if t.aide_init else 'nicht eingerichtet') }}</span></td>
   </tr>
+  {% if t.benefit and (not t.present or (t.name == 'AIDE' and not t.aide_db and not t.aide_init)) %}
+  <tr class="tool-offer"><td colspan="5">
+    <div class="fixbox">
+      <p><b>{{ 'Soll ubusec ' ~ t.name ~ ' für dich ' ~ ('einrichten' if t.present else 'installieren') ~ '?' }}</b><br>
+        <span class="small">{{ t.benefit }}</span><br><span class="small muted">{{ t.cost }}</span></p>
+      {% set act = 'aide-einrichten' if t.present else ('aide-installieren' if t.name == 'AIDE' else 'maldet-installieren') %}
+      <form method="post" action="{{ url_for('tools_action', aktion=act) }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn" data-confirm="{{ t.name }} jetzt {{ 'einrichten' if t.present else 'installieren' }}?">{{ t.name }} {{ 'einrichten' if t.present else 'installieren' }}</button>
+      </form>
+    </div>
+  </td></tr>
+  {% endif %}
   {% endfor %}
   </tbody>
 </table>
