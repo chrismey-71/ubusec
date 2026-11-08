@@ -4,6 +4,9 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## Unveröffentlicht
 
+- Prüfung „Automatische Sicherheitsupdates“: erkennt auch Werte wie „1d“ oder „always“, prüft zusätzlich den
+  systemd-Timer apt-daily-upgrade und nennt im Befund den genauen Grund (Paket fehlt, Schalter in 20auto-upgrades
+  aus oder nicht gesetzt, Timer abgeschaltet).
 - **AIDE und Linux Malware Detect per Knopfdruck:** Die Seite „Werkzeuge“ erklärt Nutzen und Aufwand und bietet
   „installieren“ bzw. „einrichten“ an. AIDE bekommt Ausnahmen für große Datenordner (Nextcloud-Daten, Postfächer,
   Datenbanken, Protokolle, Sicherungen) und legt seine Datenbank im Hintergrund mit niedriger Priorität an; geprüft

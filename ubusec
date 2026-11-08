@@ -245,10 +245,24 @@ mod_updates() {
     fi
   else need needrestart updates needrestart; fi
 
-  if ! dpkg -s unattended-upgrades >/dev/null 2>&1 || \
-     ! apt-config dump 2>/dev/null | grep -q 'APT::Periodic::Unattended-Upgrade "1"'; then
-    add MITTEL updates "Automatische Sicherheitsupdates (unattended-upgrades) nicht aktiv" \
-      "Beheben: apt install unattended-upgrades && dpkg-reconfigure -plow unattended-upgrades"
+  # Eingeschaltet wird über APT::Periodic::Unattended-Upgrade (meist in 20auto-upgrades) – erlaubt sind Zahlen
+  # oder Zeitspannen wie "1", "1d", "always"; "0"/leer heißt aus. 50unattended-upgrades legt nur fest, WAS installiert wird.
+  local uu_val uu_timer uu_det=()
+  uu_val=$(apt-config dump 2>/dev/null | sed -n 's/^APT::Periodic::Unattended-Upgrade "\(.*\)";$/\1/p' | tail -1)
+  uu_timer=$(systemctl is-enabled apt-daily-upgrade.timer 2>/dev/null)
+  if ! dpkg -s unattended-upgrades 2>/dev/null | grep -q '^Status: install ok installed'; then
+    uu_det+=("Paket unattended-upgrades ist nicht installiert")
+  fi
+  if [ -z "$uu_val" ] || [[ $uu_val =~ ^(0+|never|false|no)$ ]]; then
+    local uu_show="nicht gesetzt"; [ -n "$uu_val" ] && uu_show="auf „$uu_val“ (aus)"
+    uu_det+=("APT::Periodic::Unattended-Upgrade ist $uu_show – eingeschaltet wird es in /etc/apt/apt.conf.d/20auto-upgrades, nicht in 50unattended-upgrades")
+  fi
+  if [ -n "$uu_timer" ] && [[ ! $uu_timer =~ ^(enabled|static|alias)$ ]]; then
+    uu_det+=("Der systemd-Timer apt-daily-upgrade.timer ist „$uu_timer“ – ohne ihn laufen keine automatischen Updates")
+  fi
+  if (( ${#uu_det[@]} > 0 )); then
+    add MITTEL updates "Automatische Sicherheitsupdates (unattended-upgrades) nicht aktiv" "${uu_det[@]}" \
+      "Beheben: sudo apt install unattended-upgrades && sudo dpkg-reconfigure -plow unattended-upgrades (Frage mit „Ja“ beantworten)"
   fi
 
   if have ubuntu-distro-info; then
