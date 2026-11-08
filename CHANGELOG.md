@@ -2,6 +2,13 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## Unveröffentlicht
+
+- **chkrootkit-Meldungen einzeln bewertet** statt als Rohliste: versteckte Dateien aus unveränderten Ubuntu-Paketen →
+  harmlos; „Linux.Xor.DDoS“ für Collabora in /tmp → per AppImage-Prüfsumme bzw. byte-genauem Vergleich der
+  Systemvorlage bestätigt; „BPFDoor“ und „Packet Sniffer“ → Programm des Prozesses wird mit dem frisch geladenen
+  Ubuntu-Paket verglichen (z. B. systemd-networkd). Nur Unerklärtes bleibt ein Befund – mit Prüfen-Knopf und Hinweis.
+
 ## 1.5.0 – 2026-11-08
 
 - Prüfung „Automatische Sicherheitsupdates“: erkennt auch Werte wie „1d“ oder „always“, prüft zusätzlich den

@@ -254,7 +254,162 @@ def phpscan(paths):
     return rows
 
 
+# ------------------------------------------------------------ chkrootkit-Meldungen einordnen ---
+NET_PROGS = {"systemd-networkd", "dhclient", "dhcpcd", "NetworkManager", "wpa_supplicant", "lldpd", "tcpdump",
+             "keepalived", "systemd-resolved", "dnsmasq", "arpwatch", "suricata", "snort", "fail2ban-server", "wireshark"}
+
+
+def collabora_dirs():
+    """Entpackte Collabora-AppImages in /tmp, deren Ordnername der MD5-Prüfsumme eines AppImage aus einer Nextcloud entspricht."""
+    pats = ["/home/*/public_html/*/apps/richdocumentscode*/collabora/*.AppImage",
+            "/home/*/public_html/apps/richdocumentscode*/collabora/*.AppImage",
+            "/home/*/domains/*/public_html/*/apps/richdocumentscode*/collabora/*.AppImage",
+            "/home/*/domains/*/public_html/apps/richdocumentscode*/collabora/*.AppImage",
+            "/var/www/*/apps/richdocumentscode*/collabora/*.AppImage", "/var/www/*/*/apps/richdocumentscode*/collabora/*.AppImage",
+            "/srv/*/apps/richdocumentscode*/collabora/*.AppImage"]
+    sums = {}
+    for pat in pats:
+        for ai in glob.glob(pat):
+            try:
+                h = hashlib.md5()
+                with open(ai, "rb") as f:
+                    for b in iter(lambda: f.read(1 << 20), b""):
+                        h.update(b)
+                sums[h.hexdigest()] = ai
+            except OSError:
+                pass
+    return {"/tmp/appimage_extracted_" + k: v for k, v in sums.items()}
+
+
+def proc_check(pid, debs):
+    """(Zustand, Text) für einen von chkrootkit genannten Prozess: Programm, Paket, Vergleich mit dem Original."""
+    try:
+        exe = os.readlink("/proc/%s/exe" % pid)
+        comm = open("/proc/%s/comm" % pid).read().strip()
+    except OSError:
+        return "info", "Prozess %s läuft nicht mehr" % pid
+    pkg = owner_pkg(exe)
+    if not pkg:
+        return "bad", "%s (PID %s, %s) gehört zu keinem Paket" % (comm, pid, exe)
+    d, ver = debs.get(pkg)
+    known = " – nutzt Netzwerkpakete von Berufs wegen (z. B. DHCP)" if comm in NET_PROGS or os.path.basename(exe) in NET_PROGS else ""
+    if d:
+        orig = next((c for c in (d + exe, d + exe.replace("/usr", "", 1), d + "/usr" + exe) if os.path.isfile(c)), None)
+        if orig and sha256(exe) == sha256(orig):
+            return "ok", "%s (PID %s): %s aus Paket %s %s, identisch mit dem Original%s" % (comm, pid, exe, pkg, ver, known)
+        if orig:
+            return "bad", "%s (PID %s): %s WEICHT AB vom Original aus %s %s" % (comm, pid, exe, pkg, ver)
+    rc, out = run(["dpkg", "--verify", pkg], 120)
+    changed = any(l.endswith(" " + exe) for l in out.splitlines())
+    return ("bad" if changed else "warn"), "%s (PID %s): %s aus Paket %s – Original nicht ladbar, laut lokaler Prüfsumme %s%s" % (
+        comm, pid, exe, pkg, "VERÄNDERT" if changed else "unverändert", known)
+
+
+def chk_classify(infile, outfile):
+    """chkrootkit-Abschnitte („WARNING: …“) einzeln bewerten und als Befunde ausgeben (F/D-Zeilen)."""
+    lines = [l.rstrip("\n") for l in open(infile, errors="replace")]
+    sections, cur, rest = [], None, []
+    for l in lines:
+        if cur is None and l.strip() and not l.startswith("WARNING: ") and \
+                not re.search(r"INFECTED|not (found|tested|infected)|nothing (found|detected)|^RTNETLINK answers", l, re.I):
+            rest.append(l.strip())
+            continue
+        if l.startswith("WARNING: "):
+            cur = [l[9:].rstrip(":"), []]
+            sections.append(cur)
+            # ifpromisc schreibt die Meldung teils in dieselbe Zeile
+        elif cur is not None and l.strip() and not re.search(r"INFECTED|not infected|not found|nothing found", l):
+            cur[1].append(l.strip())
+        elif not l.strip():
+            cur = None
+    out, debs, cdirs = [], Debs(), None
+
+    def emit(sev, msg, details):
+        out.append("F\t%s\t%s" % (sev, msg))
+        out.extend("D\t" + d for d in details[:12])
+        if len(details) > 12:
+            out.append("D\t… und %d weitere" % (len(details) - 12))
+    try:
+        for head, items in sections:
+            if head.startswith("The following suspicious files and directories were found"):
+                ok, bad, other = [], [], []
+                for it in items:
+                    m = re.match(r"^(/\S.*?) \[From Debian package: ([^\]]+)\]$", it)
+                    if m and owner_pkg(m.group(1)):
+                        path, pkg = m.group(1), owner_pkg(m.group(1))
+                        rc, vo = run(["dpkg", "--verify", pkg], 120)
+                        (bad if any(x.endswith(" " + path) for x in vo.splitlines()) else ok).append("%s (%s)" % (path, pkg))
+                    else:
+                        other.append(re.sub(r" \[Not from a Debian package\]$", "", it))
+                if ok:
+                    emit("INFO", "chkrootkit: %d versteckte Dateien gehören zu Ubuntu-Paketen und sind unverändert (harmlos)" % len(ok), ok)
+                if bad:
+                    emit("HOCH", "chkrootkit: versteckte Paketdateien wurden verändert", bad + ["Vergleich: sudo dpkg --verify <paket>"])
+                if other:
+                    emit("MITTEL", "chkrootkit: versteckte Dateien, die zu keinem Paket gehören", other +
+                         ["Erklärbar (z. B. eigene Konfiguration)? Sonst Inhalt prüfen: ls -la <pfad>; sudo head <pfad>"])
+            elif head.startswith("Possible Linux.Xor.DDoS"):
+                if cdirs is None:
+                    cdirs = collabora_dirs()
+                ok, bad = [], []
+                for it in items:
+                    path = re.sub(r" \[(Not from|From) a? ?Debian package.*\]$", "", it)
+                    cd = next((d for d in cdirs if path.startswith(d + "/")), None)
+                    if cd:
+                        ok.append(path)
+                        continue
+                    m = re.match(r"^/tmp/coolwsd\.[^/]+/systemplate(/.+)$", path)
+                    if m and os.path.isfile(m.group(1)) and os.path.isfile(path) and sha256(path) == sha256(m.group(1)):
+                        ok.append(path)
+                        continue
+                    bad.append(path)
+                if ok:
+                    emit("INFO", "chkrootkit „Linux.Xor.DDoS“: %d Dateien gehören zu Collabora Online (Nextcloud Office) – geprüft, harmlos" % len(ok),
+                         ok[:3] + ["AppImage-Ordner per MD5-Prüfsumme der Original-Datei bestätigt; Systemvorlage byte-gleich mit den Systemdateien"])
+                if bad:
+                    emit("HOCH", "chkrootkit „Linux.Xor.DDoS“: Programmdateien in /tmp ohne bekannte Herkunft", bad +
+                         ["chkrootkit meldet jede ausführbare Datei in /tmp; Herkunft klären (Prüfen-Knopf zeigt Besitzer, Datum, Paket)"])
+            elif head.startswith("Possible Linux BPFDoor"):
+                res = []
+                for it in items:
+                    m = re.match(r"^/proc/(\d+)/", it)
+                    if m:
+                        res.append(proc_check(m.group(1), debs))
+                st = {r[0] for r in res}
+                if res and st == {"info"}:
+                    emit("INFO", "chkrootkit „BPFDoor“: Prozess läuft nicht mehr – beim nächsten Scan erneut prüfen", [r[1] for r in res])
+                elif res and st <= {"ok", "info"}:
+                    emit("INFO", "chkrootkit „BPFDoor“: Fehlalarm – Prozess ist ein unverändertes Ubuntu-Programm", [r[1] for r in res] +
+                         ["chkrootkit erkennt BPFDoor an einem Warte-Zustand im Netzwerkcode, den auch normale Netzwerkdienste haben"])
+                elif res:
+                    emit("KRITISCH" if "bad" in st else "MITTEL", "chkrootkit „BPFDoor“: Prozess genauer prüfen", [r[1] for r in res])
+            elif head.startswith("Output from ifpromisc"):
+                res = []
+                for it in items:
+                    for exe, pid in re.findall(r"([^\s(\[,]+)\[(\d+)\]", it):
+                        res.append(proc_check(pid, debs))
+                st = {r[0] for r in res}
+                if res and st == {"info"}:
+                    emit("INFO", "chkrootkit „Packet Sniffer“: Prozess läuft nicht mehr – beim nächsten Scan erneut prüfen", [r[1] for r in res])
+                elif res and st <= {"ok", "info"}:
+                    emit("INFO", "chkrootkit „Packet Sniffer“: Fehlalarm – Netzwerkdienst aus einem unveränderten Ubuntu-Paket",
+                         [r[1] for r in res] + ["chkrootkit meldet jedes Programm mit Rohzugriff aufs Netzwerk; DHCP-Dienste brauchen das"])
+                elif res:
+                    emit("KRITISCH" if "bad" in st else "MITTEL", "chkrootkit „Packet Sniffer“: Programm genauer prüfen", [r[1] for r in res])
+            else:
+                emit("MITTEL", "chkrootkit: " + head[:150], items or ["(ohne weitere Angaben)"])
+        if rest:
+            emit("MITTEL", "chkrootkit meldet weitere Auffälligkeiten (oft harmlos, bitte prüfen)", rest)
+    finally:
+        debs.close()
+    with open(outfile, "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + ("\n" if out else ""))
+
+
 def main():
+    if len(sys.argv) >= 4 and sys.argv[1] == "chkrootkit-classify":
+        chk_classify(sys.argv[2], sys.argv[3])
+        return
     if len(sys.argv) < 4:
         sys.exit(2)
     kind, out, args = sys.argv[1], sys.argv[2], sys.argv[3:21]

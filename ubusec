@@ -943,13 +943,21 @@ mod_rootkit() {
       elif ! chk_infected_binary "$w"; then add KRITISCH rootkit "chkrootkit: $w"; fi
     done <"$RAW/chkrootkit-inf.txt"
     report_infected_binaries
-    # Rauschen entfernen: Netlink-Meldungen, Dokumentations-/Platzhalterdateien von Paketen
-    grep -viE 'INFECTED|^\s*$|not (found|tested|infected)|nothing (found|detected)|^RTNETLINK answers' "$RAW/chkrootkit.txt" \
-      | grep -vE '^/usr/(lib|share)/.*/\.(document|gitignore|gitkeep|keep|packlist|placeholder|travis\.yml|rspec|yardopts|npmignore|eslintrc[a-z.]*|editorconfig|build-id)$' \
-      | grep -vE '^/usr/lib/(debug|jvm)/.*/\.build-id' >"$RAW/chkrootkit-other.txt"
-    # nur noch die Überschrift übrig? Dann ist nichts zu melden
-    grep -qvE '^WARNING: The following suspicious files and directories were found:$' "$RAW/chkrootkit-other.txt" || : >"$RAW/chkrootkit-other.txt"
-    if [ -s "$RAW/chkrootkit-other.txt" ]; then take "$RAW/chkrootkit-other.txt" 5
+    # Übrige Meldungen abschnittsweise bewerten (Paketdateien, Collabora in /tmp, Netzwerkdienste …)
+    local vpy=$CHECK_DIR/verify.py; [ -f "$vpy" ] || vpy=$SRC_DIR/checks/verify.py
+    grep -v 'INFECTED' "$RAW/chkrootkit.txt" >"$RAW/chkrootkit-rest.txt"
+    if [ -f "$vpy" ] && timeout 20m python3 -I "$vpy" chkrootkit-classify "$RAW/chkrootkit-rest.txt" "$RAW/chkrootkit-class.tsv" 2>>"$RAW/chkrootkit-class.err"; then
+      local kind sev msg det=() line a b
+      flush_chk() { [ -n "${sev:-}" ] && add "$sev" rootkit "$msg" "${det[@]}"; sev=""; det=(); }
+      while IFS=$'\t' read -r kind a b; do
+        case $kind in
+          F) flush_chk; sev=$a; msg=$b ;;
+          D) det+=("$a") ;;
+        esac
+      done <"$RAW/chkrootkit-class.tsv"
+      flush_chk
+    elif grep -qvE '^\s*$|^RTNETLINK' "$RAW/chkrootkit-rest.txt"; then
+      grep -vE '^\s*$|^RTNETLINK' "$RAW/chkrootkit-rest.txt" >"$RAW/chkrootkit-other.txt"; take "$RAW/chkrootkit-other.txt" 5
       add MITTEL rootkit "chkrootkit meldet Auffälligkeiten (oft harmlos, bitte prüfen)" "${ITEMS[@]}"
     fi
   fi

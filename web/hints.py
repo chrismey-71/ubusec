@@ -334,6 +334,23 @@ _H = [
         steps=["Details im rkhunter-Log nachlesen (Rohdaten).",
                "Erklärbarer Fehlalarm: als Fehlalarm ausblenden.",
                "Rootkit-Meldung: Notfall-Hinweise befolgen."], effort="prüfen")),
+    (r"^rootkit\|chkrootkit „Linux\.Xor\.DDoS“: Programmdateien in /tmp", dict(
+        why="chkrootkit meldet unter diesem Namen jede ausführbare Datei in /tmp, die nicht aus einem Ubuntu-Paket stammt. "
+            "Collabora Online und manche Installationsprogramme legen dort legitim Programme ab – Schadsoftware aber auch.",
+        steps=["Unten „Jetzt prüfen“: zeigt Besitzer, Datum, Paket und welcher Prozess die Datei nutzt.",
+               "Gehört der Ordner zu einem laufenden Programm, das du kennst (z. B. Collabora, ein Installer)? Dann harmlos.",
+               "Unbekannt, als root ausgeführt oder aus /dev/shm: nicht löschen, sondern Notfall-Hinweise befolgen."],
+        effort="10 Min")),
+    (r"^rootkit\|chkrootkit „(BPFDoor|Packet Sniffer)“: (Prozess|Programm) genauer prüfen", dict(
+        why="chkrootkit hat einen Prozess mit Rohzugriff aufs Netzwerk gefunden. Das tun auch normale Dienste (DHCP, "
+            "Netzwerkverwaltung); ubusec konnte das Programm aber nicht eindeutig mit dem Original-Paket abgleichen.",
+        steps=["Unten „Jetzt prüfen“: vergleicht das Programm byte-genau mit dem frisch geladenen Ubuntu-Paket.",
+               "Identisch: Fehlalarm. Abweichend oder ohne Paket: Notfall-Hinweise befolgen."], effort="5 Min")),
+    (r"^rootkit\|chkrootkit: versteckte Dateien, die zu keinem Paket gehören", dict(
+        why="Versteckte Dateien (Name beginnt mit Punkt) außerhalb von Paketen – oft eigene Konfiguration oder Reste "
+            "von Programmen, manchmal ein Versteck.",
+        steps=["Unten „Jetzt prüfen“ zeigt Art, Besitzer und Datum.", "Erklärbar? Als Fehlalarm ausblenden."],
+        effort="5 Min")),
     (r"^rootkit\|chkrootkit: .*bindshell", dict(
         why="chkrootkit erkennt eine „Bindshell“ (Hintertür, die auf einem Port auf Befehle wartet) nur an der Portnummer. "
             "Auf diesem Port lauscht ein Programm, das ubusec nicht als normalen Dienst kennt – oder gar keines mehr.",
