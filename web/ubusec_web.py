@@ -19,6 +19,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -322,6 +323,11 @@ FIX_TEXT = {
                  "Legt /etc/ssh/sshd_config.d/01-ubusec.conf an, prüft sie mit sshd -t und lädt SSH neu. Bestehende "
                  "Sitzungen bleiben offen. Danach bitte sofort in einem neuen Terminal anmelden – bietet dein SSH-Programm "
                  "sehr viele Schlüssel an, kann die Grenze von 4 Versuchen greifen (dann „Rückgängig machen“)."),
+    "ssh-root-keyonly": ("Root nur noch mit SSH-Schlüssel anmelden",
+                         "Setzt PermitRootLogin prohibit-password (Datei /etc/ssh/sshd_config.d/00-ubusec-root.conf), "
+                         "prüft mit sshd -t und lädt SSH neu. ubusec macht das nur, wenn du dich in den letzten 30 Tagen "
+                         "schon einmal mit einem eingetragenen Schlüssel als root angemeldet hast – sonst wirst du auf die "
+                         "Anleitung „SSH-Schlüssel“ verwiesen. Bestehende Sitzungen bleiben offen."),
     "postfix-banner": ("Postfix-Banner verkürzen, VRFY abschalten",
                        "Setzt smtpd_banner = $myhostname ESMTP und disable_vrfy_command = yes, prüft mit postfix check und "
                        "lädt Postfix neu. Mails werden weiter normal zugestellt."),
@@ -382,6 +388,8 @@ def fix_specs(f, report):
                 add("sticky", d)
     if mod == "config" and "Kernel-Parameter (sysctl) nicht gehärtet" in msg:
         add("sysctl", "kernel")
+    if mod == "config" and msg.startswith("SSH: Root-Login mit Passwort erlaubt"):
+        add("ssh-root-keyonly", "sshd")
     if mod == "config" and re.match(r"SSH: (X11Forwarding aktiv|MaxAuthTries)", msg):
         add("ssh-safe", "sshd")
     if mod == "config" and "information disclosure in SMTP banner" in msg:
@@ -1476,6 +1484,100 @@ def create_app():
     def need_pw(name):
         u = load_users().get(session["user"])
         return u and check_pw(request.form.get(name, ""), u["hash"])
+
+    # -------------------------------------------------- SSH-Schlüssel -------
+    SSH_JSON = os.path.join(STATE_DIR, "ssh-keys.json")
+    SSH_FIX_ID = hashlib.sha256(b"ssh-root-keyonly|sshd").hexdigest()[:16]
+    SSH_ASKED = os.path.join(WEB_STATE, "ssh-asked")
+
+    def ssh_pending():
+        try:
+            asked = os.path.getmtime(SSH_ASKED)
+        except OSError:
+            return False
+        st = read_json(SSH_JSON, {}) or {}
+        return time.time() - asked < 120 and st.get("time", 0) < asked - 1
+
+    def ssh_ask(fields):
+        os.makedirs(WEB_STATE, exist_ok=True)
+        with open(SSH_ASKED, "w") as fh:
+            fh.write(str(int(time.time())))
+        fields.update(action="sshkey", user=session["user"])
+        enqueue_ctl(fields)
+
+    def ssh_wait(secs=8):
+        end = time.time() + secs
+        while time.time() < end and ssh_pending():
+            time.sleep(0.4)
+
+    @app.route("/ssh")
+    def ssh_page():
+        st = read_json(SSH_JSON, None)
+        if (not st or time.time() - st.get("time", 0) > 300) and not ssh_pending():
+            ssh_ask({"op": "status"})
+        port = str(((st or {}).get("sshd") or {}).get("port", "22"))
+        try:
+            fqdn = socket.getfqdn()
+        except OSError:
+            fqdn = os.uname().nodename
+        res, fpend = fix_result(SSH_FIX_ID)
+        return render_template("ssh.html", st=st or {}, pending=ssh_pending(), fqdn=fqdn,
+                               pp="" if port == "22" else " -p " + port, fix=res, fix_pending=fpend, fix_id=SSH_FIX_ID)
+
+    @app.route("/api/ssh")
+    def ssh_status():
+        return jsonify({"pending": ssh_pending()})
+
+    @app.route("/ssh/eintragen", methods=["POST"])
+    def ssh_add():
+        key = request.form.get("key", "").strip()
+        if "PRIVATE KEY" in key or "PuTTY-User-Key-File" in key:
+            flash("Das war ein PRIVATER Schlüssel – er wurde nicht gespeichert und nicht übertragen. Bitte nur den "
+                  "öffentlichen Teil (Datei mit der Endung .pub) einfügen. Tipp: Den privaten Schlüssel nirgends sonst "
+                  "einfügen; im Zweifel auf dem Gerät einen neuen erzeugen.", "error")
+            return redirect(url_for("ssh_page") + "#eintragen")
+        if not 20 <= len(key) <= 2900:
+            flash("Bitte einen öffentlichen SSH-Schlüssel einfügen (eine Zeile, beginnt mit ssh-ed25519 …).", "error")
+            return redirect(url_for("ssh_page") + "#eintragen")
+        b64 = base64.urlsafe_b64encode(key.encode("utf-8")).decode().rstrip("=")
+        ssh_ask({"op": "add", "key": b64})
+        ssh_wait()
+        last = (read_json(SSH_JSON, {}) or {}).get("last") or {}
+        if not ssh_pending() and last.get("op") == "add":
+            flash(last.get("message", ""), "ok" if last.get("ok") else "error")
+        return redirect(url_for("ssh_page") + "#eintragen")
+
+    @app.route("/ssh/entfernen", methods=["POST"])
+    def ssh_del():
+        fp = request.form.get("fp", "")
+        if not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", fp):
+            abort(400)
+        ssh_ask({"op": "del", "fp": fp})
+        ssh_wait()
+        last = (read_json(SSH_JSON, {}) or {}).get("last") or {}
+        if not ssh_pending() and last.get("op") == "del":
+            flash(last.get("message", ""), "ok" if last.get("ok") else "error")
+        return redirect(url_for("ssh_page") + "#schluessel")
+
+    @app.route("/ssh/aktualisieren", methods=["POST"])
+    def ssh_refresh():
+        ssh_ask({"op": "status"})
+        ssh_wait()
+        return redirect(url_for("ssh_page") + "#anmeldungen")
+
+    @app.route("/ssh/umstellen", methods=["POST"])
+    def ssh_switch():
+        op = request.form.get("op")
+        if op not in ("apply", "undo"):
+            abort(400)
+        os.makedirs(FIX_PENDING, exist_ok=True)
+        with open(os.path.join(FIX_PENDING, SSH_FIX_ID), "w") as fh:
+            fh.write(str(int(time.time())))
+        enqueue_ctl({"action": "fix", "op": op, "kind": "ssh-root-keyonly", "target": "sshd", "domain": "",
+                     "id": SSH_FIX_ID, "user": session["user"]})
+        # danach die Anzeige (Einstellung, Schlüssel) auffrischen
+        ssh_ask({"op": "status"})
+        return redirect(url_for("ssh_page") + "#umstellen")
 
     @app.route("/einstellungen")
     def settings():

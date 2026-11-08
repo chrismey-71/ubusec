@@ -443,8 +443,10 @@ mod_config() {
   if have sshd && sshd -T >"$RAW/sshd-T.txt" 2>/dev/null; then
     sv() { awk -v k="$1" '$1==k{print $2; exit}' "$RAW/sshd-T.txt"; }
     case $(sv permitrootlogin) in
-      yes) add HOCH config "SSH: Root-Login mit Passwort erlaubt (PermitRootLogin yes)" "Empfehlung: PermitRootLogin prohibit-password oder no";;
+      yes) add HOCH config "SSH: Root-Login mit Passwort erlaubt (PermitRootLogin yes)" "Empfehlung: PermitRootLogin prohibit-password oder no" \
+             "Schritt-für-Schritt-Anleitung und Schlüsselverwaltung: Weboberfläche → Einstellungen → SSH-Schlüssel (oder ubusec --ssh-help)";;
     esac
+    ssh_keys_status status   # Schlüssel und letzte Anmeldungen für die Seite „SSH-Schlüssel“ auffrischen
     [ "$(sv passwordauthentication)" = yes ] && \
       add MITTEL config "SSH: Passwort-Anmeldung aktiv – anfällig für Brute-Force" "Empfehlung: nur Schlüssel (PasswordAuthentication no)"
     [ "$(sv permitemptypasswords)" = yes ] && add KRITISCH config "SSH: Leere Passwörter erlaubt (PermitEmptyPasswords yes)"
@@ -1851,6 +1853,7 @@ do_install() {
     install -d -m 0755 /usr/local/lib/ubusec "$CHECK_DIR"; install -m 0644 "$SRC_DIR/checks/webcheck.py" "$CHECK_DIR/webcheck.py"
     [ -f "$SRC_DIR/checks/verify.py" ] && install -m 0644 "$SRC_DIR/checks/verify.py" "$CHECK_DIR/verify.py"
     [ -f "$SRC_DIR/checks/fix.py" ] && install -m 0644 "$SRC_DIR/checks/fix.py" "$CHECK_DIR/fix.py"
+    [ -f "$SRC_DIR/checks/sshkeys.py" ] && install -m 0644 "$SRC_DIR/checks/sshkeys.py" "$CHECK_DIR/sshkeys.py"
   fi
   write_conf
   configure_rkhunter
@@ -2269,6 +2272,18 @@ read_request() { # read_request DATEI → füllt REQ, 1 bei ungültiger Datei
   return 0
 }
 
+ssh_keys_status() { # ssh_keys_status status|add|del [ARG] → $STATE_DIR/ssh-keys.json (für die Weboberfläche)
+  local d=$CHECK_DIR out=$STATE_DIR/ssh-keys.json; [ -f "$d/sshkeys.py" ] || d=$SRC_DIR/checks
+  [ -f "$d/sshkeys.py" ] || return 0
+  if [ "$1" = status ]; then
+    UBUSEC_STATE=$STATE_DIR timeout 2m python3 -I "$d/sshkeys.py" status "$out" >>"$LOG_DIR/fix.log" 2>&1
+  else
+    UBUSEC_STATE=$STATE_DIR timeout 2m python3 -I "$d/sshkeys.py" "$1" "$2" "$out" >>"$LOG_DIR/fix.log" 2>&1
+  fi
+  chgrp "$(grp)" "$out" 2>/dev/null; chmod 640 "$out" 2>/dev/null
+  return 0
+}
+
 process_queue() { # process_queue req|ctl
   local kind=${1:-req} f action user m
   ensure_dirs
@@ -2399,14 +2414,14 @@ process_queue() { # process_queue req|ctl
         # sichert vor jeder Änderung und nimmt sie bei Fehlern der Website selbst zurück
         local fo=${REQ[op]:-} fk=${REQ[kind]:-} ft=${REQ[target]:-} fd=${REQ[domain]:-} fid=${REQ[id]:-} fdir=$STATE_DIR/fixes
         [[ $fo =~ ^(apply|undo)$ ]] || { audit "ABGELEHNT $user: Korrektur-Aktion"; continue; }
-        [[ $fk =~ ^(wp-chmod|wp-fileedit|wp-uploads|wp-xmlrpc|svc-rpcbind|sysctl|ssh-safe|postfix-banner|bind-version|php-ini|quarantine|sticky)$ ]] \
+        [[ $fk =~ ^(wp-chmod|wp-fileedit|wp-uploads|wp-xmlrpc|svc-rpcbind|sysctl|ssh-safe|ssh-root-keyonly|postfix-banner|bind-version|php-ini|quarantine|sticky)$ ]] \
           || { audit "ABGELEHNT $user: Korrektur-Art '$fk'"; continue; }
         [[ $fid =~ ^[a-f0-9]{16}$ ]] || { audit "ABGELEHNT $user: Korrektur-ID"; continue; }
         local fok=0
         case $fk in
           svc-rpcbind) [ "$ft" = rpcbind ] && fok=1 ;;
           sysctl) [ "$ft" = kernel ] && fok=1 ;;
-          ssh-safe) [ "$ft" = sshd ] && fok=1 ;;
+          ssh-safe|ssh-root-keyonly) [ "$ft" = sshd ] && fok=1 ;;
           postfix-banner) [ "$ft" = postfix ] && fok=1 ;;
           bind-version) [ "$ft" = bind ] && fok=1 ;;
           sticky) [[ $ft =~ ^/[A-Za-z0-9._/@+:-]{1,300}$ && $ft != *"/../"* && $ft != /proc* && $ft != /sys* ]] && fok=1 ;;
@@ -2422,6 +2437,17 @@ process_queue() { # process_queue req|ctl
           || printf '{"kind":"%s","time":%s,"status":"failed","message":"Die Korrektur ist fehlgeschlagen (siehe %s).","lines":[]}\n' \
                "$fk" "$(date +%s)" "$LOG_DIR/fix.log" >"$fdir/$fid.json"
         chgrp "$(grp)" "$fdir/$fid.json" 2>/dev/null; chmod 640 "$fdir/$fid.json" 2>/dev/null ;;
+      sshkey)
+        # SSH-Schlüssel für root: anzeigen, eintragen, entfernen (nur öffentliche Schlüssel, sshkeys.py prüft erneut)
+        local so=${REQ[op]:-} sa=""
+        case $so in
+          status) ;;
+          add) sa=${REQ[key]:-}; [[ $sa =~ ^[A-Za-z0-9_-]{20,4000}$ ]] || { audit "ABGELEHNT $user: SSH-Schlüssel-Format"; continue; } ;;
+          del) sa=${REQ[fp]:-}; [[ $sa =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]] || { audit "ABGELEHNT $user: Fingerabdruck"; continue; } ;;
+          *) audit "ABGELEHNT $user: SSH-Aktion '$so'"; continue ;;
+        esac
+        case $so in add) audit "SSH-SCHLÜSSEL EINTRAGEN $user" ;; del) audit "SSH-SCHLÜSSEL ENTFERNEN $user: $sa" ;; esac
+        ssh_keys_status "$so" $sa ;;
       delreport|delreports|resetrecs)
         # Berichte löschen bzw. Empfehlungen neu beginnen – nicht während eines laufenden Scans
         if grep -q '"running":true' "$STATE_DIR/status.json" 2>/dev/null && kill -0 "$(sed -n 's/.*"pid":\([0-9]*\).*/\1/p' "$STATE_DIR/status.json")" 2>/dev/null; then
@@ -2610,6 +2636,76 @@ EOF
   fi
 }
 
+ssh_help() {
+  local h port pp=""
+  h=$(hostname -f 2>/dev/null || hostname)
+  port=$(sshd -T 2>/dev/null | awk '$1=="port"{print $2; exit}'); port=${port:-22}
+  [ "$port" = 22 ] || pp=" -p $port"
+  cat <<EOF
+SSH-Schlüssel einrichten – Anleitung von ubusec $UBUSEC_VERSION
+(Ausführlicher, mit Schlüsselverwaltung und Prüfung: Weboberfläche → Einstellungen → SSH-Schlüssel)
+
+WIE ES FUNKTIONIERT
+  Ein SSH-Schlüssel besteht aus zwei Teilen: dem PRIVATEN Schlüssel (bleibt auf deinem Gerät, wie ein
+  Haustürschlüssel) und dem ÖFFENTLICHEN Schlüssel (Endung .pub, kommt auf den Server, wie das Schloss).
+  Grundregel: Jedes Gerät bekommt seinen eigenen Schlüssel. Du kopierst also keinen Schlüssel von Computer
+  zu Computer, sondern trägst auf dem Server mehrere öffentliche Schlüssel ein. Geht ein Gerät verloren,
+  entfernst du nur dessen Schlüssel.
+
+1. SCHLÜSSEL ERZEUGEN (auf jedem Gerät einmal)
+  Windows 10/11 – PowerShell öffnen (Start → „PowerShell“):
+      ssh-keygen -t ed25519 -C "christian-laptop"
+      (Enter für den Speicherort; dann eine Passphrase wählen – sie schützt den Schlüssel, falls das
+       Gerät gestohlen wird)
+      Öffentlichen Schlüssel anzeigen:   type \$env:USERPROFILE\\.ssh\\id_ed25519.pub
+  Mac / Linux – Terminal öffnen:
+      ssh-keygen -t ed25519 -C "christian-mac"
+      cat ~/.ssh/id_ed25519.pub
+  WebSSH (iPhone/iPad/Mac) und andere Apps (Termius, PuTTY):
+      Bietet die App „Schlüssel erzeugen“ an, nimm Ed25519 und kopiere den öffentlichen Teil.
+      Sonst auf dem Mac/PC einen EIGENEN Schlüssel für dieses Gerät erzeugen, z. B.
+          ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_ipad -C "christian-ipad"
+      die PRIVATE Datei id_ed25519_ipad (ohne .pub) per AirDrop/USB auf das Gerät bringen, in der App
+      importieren (Verbindung bearbeiten → Anmeldung per Schlüssel statt Passwort) und die Kopie danach
+      vom Mac/PC löschen. Browser-WebSSH: die private Datei im Feld „Private Key“ auswählen.
+      PuTTYgen: Typ EdDSA/Ed25519 → Generate → der Text im oberen Feld ist der öffentliche Schlüssel.
+
+2. ÖFFENTLICHEN SCHLÜSSEL AUF DEN SERVER BRINGEN (noch mit Passwort angemeldet)
+  Am einfachsten: Weboberfläche → Einstellungen → SSH-Schlüssel → Zeile einfügen → „Eintragen“.
+  Oder vom Mac/Linux aus:      ssh-copy-id$pp root@$h
+  Oder auf dem Server von Hand:
+      sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
+      echo 'ssh-ed25519 AAAA… christian-laptop' | sudo tee -a /root/.ssh/authorized_keys
+      sudo chmod 600 /root/.ssh/authorized_keys
+  NIE den privaten Schlüssel (-----BEGIN OPENSSH PRIVATE KEY-----) irgendwo einfügen.
+
+3. TESTEN – in einem NEUEN Fenster, das alte offen lassen
+      ssh$pp root@$h
+  Es darf nicht mehr nach dem Server-Passwort gefragt werden (höchstens nach der Passphrase des
+  Schlüssels). Für jedes Gerät wiederholen. Die Weboberfläche zeigt unter „Letzte Anmeldungen als root“,
+  mit welchem Schlüssel sich jedes Gerät angemeldet hat.
+
+4. PASSWORT-LOGIN FÜR ROOT ABSCHALTEN
+  Weboberfläche → Einstellungen → SSH-Schlüssel → „Jetzt umstellen“ (geht erst, wenn eine
+  Schlüssel-Anmeldung als root geklappt hat) – oder von Hand:
+      echo 'PermitRootLogin prohibit-password' | sudo tee /etc/ssh/sshd_config.d/00-ubusec-root.conf
+      sudo sshd -t && sudo systemctl reload ssh
+  Bestehende Sitzungen bleiben offen. Sofort in einem neuen Fenster erneut anmelden und testen.
+  Auch der SSH-Tunnel zur Weboberfläche (ssh$pp -L 8765:127.0.0.1:8765 root@$h) nutzt dann
+  automatisch den Schlüssel.
+
+5. NOTFALL – falls du dich doch ausgesperrt hast
+  Über die Konsole im Kundenbereich deines Anbieters (VNC/„Konsole“) oder Webmin → Terminal anmelden:
+      rm /etc/ssh/sshd_config.d/00-ubusec-root.conf && systemctl reload ssh
+  Danach geht die Anmeldung mit Passwort wieder.
+
+NEUES GERÄT SPÄTER HINZUFÜGEN
+  Auf dem neuen Gerät Schritt 1, dann den öffentlichen Schlüssel in der Weboberfläche eintragen (von
+  einem Gerät aus, das schon Zugang hat – du kannst ihn dir auch selbst mailen). Der öffentliche
+  Schlüssel ist nicht geheim; geheim ist nur der private.
+EOF
+}
+
 usage() {
   cat <<EOF
 ubusec $UBUSEC_VERSION – Sicherheits-Scanner für Ubuntu-Server
@@ -2642,6 +2738,7 @@ Weboberfläche
   --web-user NAME [--totp]  Web-Benutzer anlegen bzw. Passwort ändern (--totp: 2-Faktor)
   --web-user-del NAME       Web-Benutzer löschen
   --version | --help
+  --ssh-help                Anleitung: Anmeldung per SSH-Schlüssel einrichten (auch für mehrere Geräte)
 
 Exit-Code: 0 ok/Info · 1 Niedrig/Mittel · 2 Hoch · 3 Kritisch
 EOF
@@ -2672,6 +2769,7 @@ main() {
       --init-baseline) action=baseline ;; --accept) action=accept ;;
       --last) action=last ;; --uninstall) action=uninstall ;;
       --version|-V) echo "ubusec $UBUSEC_VERSION"; exit 0 ;;
+      --ssh-help) ssh_help; exit 0 ;;
       --help|-h) usage; exit 0 ;;
       *) usage >&2; die "Unbekannte Option: $1" ;;
     esac; shift

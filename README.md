@@ -116,6 +116,7 @@ Nginx entsprechend: `proxy_pass http://127.0.0.1:8765;` plus
 
 - **Mein Konto:** Passwort ändern (andere Sitzungen werden dabei abgemeldet), Zwei-Faktor einrichten, neu einrichten oder ausschalten.
 - **Benutzer:** weitere Benutzer anlegen und löschen.
+- **SSH-Schlüssel:** Schritt-für-Schritt-Anleitung (Windows, Mac, Linux, WebSSH, PuTTY, mehrere Geräte), öffentliche Schlüssel für root eintragen und entfernen (mit Sicherung von `authorized_keys`), letzte Anmeldungen als root mit dem benutzten Schlüssel, und die geschützte Umstellung auf `PermitRootLogin prohibit-password` – erst möglich, wenn eine Schlüssel-Anmeldung als root nachweislich geklappt hat. Dieselbe Anleitung im Terminal: `ubusec --ssh-help`.
 - **Geplante Scans:** Schnell- und Vollscan ein-/ausschalten, Wochentage und Uhrzeit wählen.
 - **Benachrichtigungen:** E-Mail und/oder ntfy-Push, ab welcher Schwere, nur bei neuen Meldungen, Testnachricht.
 - **Scan-Einstellungen:** Aufbewahrung der Berichte; beim Virenscan Ordner, maximale Dateigröße, Anzahl paralleler Prozesse und Ausnahmen (Datenbanken, Backups, Protokolle, Postfächer, Nextcloud-Datenordner, eigene Ordner); Webverzeichnisse, Domains ausschließen oder ergänzen, gründliche TLS-Prüfung, WPScan-Token.

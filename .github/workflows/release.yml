@@ -42,7 +42,7 @@ jobs:
       - name: Syntax prüfen
         run: |
           bash -n ubusec
-          python3 -m py_compile web/ubusec_web.py web/hints.py checks/webcheck.py checks/verify.py checks/fix.py
+          python3 -m py_compile web/ubusec_web.py web/hints.py checks/webcheck.py checks/verify.py checks/fix.py checks/sshkeys.py
 
       - name: Paket bauen
         run: |

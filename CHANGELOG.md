@@ -4,6 +4,13 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.5.0 – 2026-11-08
 
+- **SSH-Schlüssel einrichten, ohne sich auszusperren:** neue Seite „SSH-Schlüssel“ (Einstellungen bzw. Knopf am
+  Befund „Root-Login mit Passwort“) mit Anleitung für Windows, Mac, Linux, WebSSH und PuTTY – ein Schlüssel pro Gerät,
+  neue Geräte hinzufügen, verlorene entfernen, Notfallzugang über die Konsole des Anbieters oder Webmin. Öffentliche
+  Schlüssel lassen sich dort eintragen und entfernen (private werden erkannt und abgewiesen, PuTTY-Format wird
+  umgewandelt, vorher wird gesichert). ubusec zeigt die letzten Anmeldungen als root mit dem benutzten Schlüssel und
+  stellt erst dann auf `PermitRootLogin prohibit-password` um, wenn eine Schlüssel-Anmeldung als root geklappt hat;
+  der letzte Schlüssel kann danach nicht versehentlich entfernt werden. Im Terminal: `ubusec --ssh-help`.
 - **chkrootkit-Meldungen einzeln bewertet** statt als Rohliste: versteckte Dateien aus unveränderten Ubuntu-Paketen →
   harmlos; „Linux.Xor.DDoS“ für Collabora in /tmp → per AppImage-Prüfsumme bzw. byte-genauem Vergleich der
   Systemvorlage bestätigt; „BPFDoor“ und „Packet Sniffer“ → Programm des Prozesses wird mit dem frisch geladenen

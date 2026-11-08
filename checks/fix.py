@@ -2,8 +2,8 @@
 """ubusec – Korrekturen auf Knopfdruck (läuft als root).
 
 Aufruf:  fix.py apply|undo ART ZIEL ERGEBNISDATEI [DOMAIN]
-Arten (bewusst wenige, gut prüfbare Änderungen; SSH- und Firewall-Änderungen gibt es hier absichtlich nicht,
-weil sie den Zugang zum Server kosten können):
+Arten (bewusst wenige, gut prüfbare Änderungen; Firewall-Änderungen gibt es hier absichtlich nicht, SSH nur mit
+Schutz vor dem Aussperren):
   wp-chmod       wp-config.php auf 640 setzen (nur Besitzer und Gruppe dürfen lesen)
   wp-fileedit    define('DISALLOW_FILE_EDIT', true); in wp-config.php ergänzen
   wp-uploads     PHP-Ausführung im Upload-Ordner per .htaccess sperren
@@ -129,7 +129,7 @@ def restore(changes):
 
 def reload_after(kind):
     """Dienste nach dem Zurücknehmen neu laden, damit der alte Zustand wieder gilt."""
-    if kind == "ssh-safe":
+    if kind in ("ssh-safe", "ssh-root-keyonly"):
         if run(["systemctl", "reload", "ssh"], 30)[0] != 0:
             run(["systemctl", "reload", "sshd"], 30)
     elif kind == "bind-version":
@@ -285,6 +285,48 @@ def do_ssh_safe(target, fdir, changes):
         ["X11Forwarding no", "MaxAuthTries 4"]
 
 
+KEYONLY_FILE = "/etc/ssh/sshd_config.d/00-ubusec-root.conf"
+
+
+def do_ssh_root_keyonly(target, fdir, changes):
+    """PermitRootLogin prohibit-password – nur wenn eine Schlüssel-Anmeldung als root nachweislich funktioniert hat."""
+    if target != "sshd":
+        raise Refuse("Nur sshd")
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import sshkeys
+    keys, _ = sshkeys.read_keys()
+    good = [k for k in keys if k["valid"] and not k["restricted"]]
+    if not good:
+        raise Refuse("Für root ist noch kein SSH-Schlüssel eingetragen. Bitte zuerst der Anleitung „SSH-Schlüssel“ "
+                     "folgen – sonst würdest du dich aussperren.")
+    if not sshkeys.key_login_ok(keys, sshkeys.logins(keys)):
+        raise Refuse("Es gab in den letzten %d Tagen noch keine erfolgreiche Anmeldung als root mit einem der "
+                     "eingetragenen Schlüssel. Bitte erst von jedem Gerät, das du nutzt, einmal per Schlüssel "
+                     "anmelden – dann umstellen." % sshkeys.KEYONLY_DAYS)
+    main = read("/etc/ssh/sshd_config")
+    if not re.search(r"(?mi)^\s*Include\s+/etc/ssh/sshd_config\.d/\*\.conf", main):
+        raise Refuse("sshd_config bindet sshd_config.d nicht ein – bitte von Hand in /etc/ssh/sshd_config ändern.")
+    backup(fdir, KEYONLY_FILE, changes)
+    write_like(KEYONLY_FILE, "# von ubusec – root nur noch mit SSH-Schlüssel (Passwort für root abgeschaltet)\n"
+                             "# Notfall (z. B. über die Konsole des Anbieters):\n"
+                             "#   rm %s && systemctl reload ssh\nPermitRootLogin prohibit-password\n" % KEYONLY_FILE,
+               ref_dir_owner="/etc/ssh/sshd_config.d")
+    os.chmod(KEYONLY_FILE, 0o644)
+    sshd = shutil.which("sshd") or "/usr/sbin/sshd"
+    rc, out = run([sshd, "-t"], 20)
+    if rc != 0:
+        raise Refuse("sshd -t meldet einen Fehler: %s" % out[:200])
+    rc, eff = run([sshd, "-T"], 20)
+    if rc == 0 and not re.search(r"(?m)^permitrootlogin (without-password|prohibit-password)$", eff.lower()):
+        raise Refuse("Eine andere SSH-Einstellung legt PermitRootLogin vorher fest (z. B. direkt in "
+                     "/etc/ssh/sshd_config vor der Include-Zeile) – bitte dort ändern.")
+    if run(["systemctl", "reload", "ssh"], 30)[0] != 0:
+        run(["systemctl", "reload", "sshd"], 30)
+    return ("Root meldet sich ab jetzt nur noch mit Schlüssel an (%d Schlüssel eingetragen). Bestehende Sitzungen "
+            "bleiben offen – bitte jetzt in einem NEUEN Fenster anmelden und testen." % len(good)), \
+        ["PermitRootLogin prohibit-password", "Notfall: sudo rm %s && sudo systemctl reload ssh" % KEYONLY_FILE]
+
+
 def do_postfix_banner(target, fdir, changes):
     if target != "postfix" or not shutil.which("postconf"):
         raise Refuse("Postfix nicht gefunden")
@@ -390,6 +432,7 @@ def do_sticky(target, fdir, changes):
 
 ACTIONS = {"wp-chmod": do_wp_chmod, "sticky": do_sticky, "wp-fileedit": do_wp_fileedit, "wp-uploads": do_wp_uploads,
            "wp-xmlrpc": do_wp_xmlrpc, "svc-rpcbind": do_svc_rpcbind, "sysctl": do_sysctl, "ssh-safe": do_ssh_safe,
+           "ssh-root-keyonly": do_ssh_root_keyonly,
            "postfix-banner": do_postfix_banner, "bind-version": do_bind_version, "php-ini": do_php_ini,
            "quarantine": do_quarantine}
 WEB_ACTIONS = {"wp-fileedit", "wp-uploads", "wp-xmlrpc", "wp-chmod", "php-ini", "quarantine"}

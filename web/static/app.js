@@ -68,6 +68,20 @@
     setTimeout(poll, 2000);
   });
 
+  // SSH-Schlüssel: warten, bis root die Daten geliefert hat
+  const sshp = document.getElementById("ssh-pending");
+  if (sshp) {
+    const poll = async () => {
+      try {
+        const r = await fetch("/api/ssh", { credentials: "same-origin" });
+        const j = await r.json();
+        if (!j.pending) { location.reload(); return; }
+      } catch (_) { /* später erneut */ }
+      setTimeout(poll, 2000);
+    };
+    setTimeout(poll, 1500);
+  }
+
   // Korrektur auf Knopfdruck: auf das Ergebnis warten
   document.querySelectorAll(".fix-item[data-pending='1']").forEach((box) => {
     const det = box.closest("details"); if (det) det.open = true;

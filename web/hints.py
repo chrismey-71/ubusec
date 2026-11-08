@@ -119,19 +119,24 @@ _H = [
         steps=["Vorschläge der Reihe nach durchgehen (Liste unten auf der Seite „Empfehlungen“).",
                "$ sudo lynis show details <TEST-ID>"], effort="1 Std")),
     (r"^config\|SSH: Root-Login mit Passwort", dict(
-        why="Root ist der erste Benutzername, den Angreifer ausprobieren. Mit Passwort-Login genügt ein erratenes "
-            "Passwort für die volle Kontrolle.",
-        steps=["Zuerst sicherstellen, dass die Anmeldung per SSH-Schlüssel funktioniert!",
-               "In /etc/ssh/sshd_config.d/99-hardening.conf eintragen: PermitRootLogin prohibit-password",
-               "$ sudo sshd -t && sudo systemctl reload ssh",
-               "Neue SSH-Sitzung testen, bevor die alte geschlossen wird."], effort="15 Min")),
+        why="Root ist der erste Benutzername, den Angreifer ausprobieren – jeder Server im Internet bekommt täglich "
+            "tausende Rateversuche. Mit Passwort-Login genügt ein erratenes Passwort für die volle Kontrolle. Mit "
+            "SSH-Schlüssel laufen diese Versuche ins Leere. Die Einrichtung dauert pro Gerät etwa 5 Minuten; jedes "
+            "Gerät (PC, Mac, iPad, WebSSH) bekommt einfach seinen eigenen Schlüssel.",
+        steps=["Seite „SSH-Schlüssel“ öffnen (Knopf unten) – dort steht die Anleitung für Windows, Mac, Linux und WebSSH.",
+               "Auf jedem Gerät einen Schlüssel erzeugen und den öffentlichen Teil dort eintragen.",
+               "Von jedem Gerät aus einmal per Schlüssel anmelden – ubusec zeigt, welcher Schlüssel benutzt wurde.",
+               "Dann „Jetzt umstellen“: Root nur noch mit Schlüssel (das Passwort bleibt für Webmin/Konsole gültig).",
+               "Anleitung auch auf der Kommandozeile:", "$ ubusec --ssh-help"], effort="30 Min",
+        link="/ssh", link_label="Anleitung und Schlüssel verwalten")),
     (r"^config\|SSH: Passwort-Anmeldung aktiv", dict(
         why="Jeder Server im Internet bekommt täglich tausende Passwort-Rateversuche. Mit Schlüssel-Anmeldung laufen "
             "diese ins Leere.",
         steps=["SSH-Schlüssel für alle Benutzer einrichten und testen (ssh-copy-id).",
                "In /etc/ssh/sshd_config.d/99-hardening.conf: PasswordAuthentication no und KbdInteractiveAuthentication no",
                "$ sudo sshd -t && sudo systemctl reload ssh",
-               "Virtualmin: SFTP-Benutzer mit Passwort brauchen ggf. einen Match-Block als Ausnahme."], effort="15 Min")),
+               "Virtualmin: SFTP-Benutzer mit Passwort brauchen ggf. einen Match-Block als Ausnahme."], effort="15 Min",
+        link="/ssh", link_label="Anleitung SSH-Schlüssel")),
     (r"^config\|SSH: Leere Passwörter", dict(
         why="Konten ohne Passwort wären per SSH ohne jede Hürde zugänglich.",
         steps=["In der SSH-Konfiguration: PermitEmptyPasswords no", "$ sudo sshd -t && sudo systemctl reload ssh"],

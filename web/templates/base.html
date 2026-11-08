@@ -25,7 +25,7 @@
       <a href="{{ url_for('reports') }}" {% if ep in ('reports', 'report', 'raw_file') %}aria-current="page"{% endif %}>Berichte</a>
       <a href="{{ url_for('recommendations') }}" {% if ep == 'recommendations' %}aria-current="page"{% endif %}>Empfehlungen</a>
       <a href="{{ url_for('tools') }}" {% if ep == 'tools' %}aria-current="page"{% endif %}>Werkzeuge</a>
-      <a href="{{ url_for('settings') }}" {% if ep in ('settings', 'totp_setup') %}aria-current="page"{% endif %}>Einstellungen</a>
+      <a href="{{ url_for('settings') }}" {% if ep in ('settings', 'totp_setup', 'ssh_page') %}aria-current="page"{% endif %}>Einstellungen</a>
     </nav>
     {% if NEW_VERSION %}<a class="update-pill" href="{{ url_for('tools') }}#ubusec">Neue Version {{ NEW_VERSION }}</a>{% endif %}
     <div class="running-pill" id="running-pill" hidden><span class="pulse" aria-hidden="true"></span><a href="{{ url_for('scan') }}">Scan läuft</a></div>

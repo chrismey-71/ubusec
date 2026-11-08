@@ -42,6 +42,7 @@
       </ol>
     </div>
     {% endif %}
+    {% if h.link %}<p class="hint-link"><a class="btn" href="{{ h.link }}">{{ h.link_label or 'Anleitung öffnen' }}</a></p>{% endif %}
     {% if f.module == 'baseline' and actions and f.severity != 'INFO' %}
     <div class="fixbox">
       <h4>Änderung war beabsichtigt?</h4>

@@ -407,3 +407,12 @@ td.del { text-align: right; white-space: nowrap; }
 td.del form { margin: 0; }
 .reset-zone { margin-top: 2.5rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* SSH-Schlüssel */
+ul.plain { list-style: none; padding-left: 0; }
+ul.plain li { margin: .35rem 0; }
+details.howto { border: 1px solid var(--line, #ddd); border-radius: 6px; padding: .5rem .9rem; margin: .6rem 0; background: var(--surface); }
+details.howto summary { cursor: pointer; }
+details.howto li { margin: .45rem 0; }
+.hint-link { margin: .8rem 0; }
+#eintragen textarea { width: 100%; font-family: ui-monospace, monospace; font-size: .9rem; }

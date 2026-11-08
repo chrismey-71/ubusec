@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}SSH-Schlüssel{% endblock %}
+{% macro cmd(c) %}<span class="cmdline"><code>{{ c }}</code><button type="button" class="copy" data-copy="{{ c }}">Kopieren</button></span>{% endmacro %}
+{% block content %}
+{% set eff = st.sshd or {} %}
+{% set keys = st.get('keys', []) %}
+{% set goodkeys = keys | selectattr('valid') | rejectattr('restricted') | list %}
+{% set keyonly = eff.permitrootlogin in ('without-password', 'prohibit-password', 'no') %}
+<h1>SSH-Schlüssel für root</h1>
+
+{% if pending %}
+<p class="flash flash-info" id="ssh-pending" data-pending="1">Daten werden vom Server geholt … die Seite aktualisiert sich gleich.</p>
+{% endif %}
+
+<nav class="subnav" aria-label="Abschnitte">
+  <a href="#prinzip">So funktioniert es</a>
+  <a href="#erzeugen">1. Erzeugen</a>
+  <a href="#eintragen">2. Eintragen</a>
+  <a href="#anmeldungen">3. Testen</a>
+  <a href="#umstellen">4. Umstellen</a>
+  <a href="#notfall">Notfall</a>
+</nav>
+
+<section class="setting" id="stand">
+  <h2>Stand auf {{ fqdn }}</h2>
+  {% if not st %}
+    <p class="muted">Noch keine Daten – sie werden gerade geholt.</p>
+  {% else %}
+  <ul class="plain">
+    <li class="{{ 'ok-line' if goodkeys else 'warn-line' }}">{{ goodkeys | length }} SSH-Schlüssel für root eingetragen</li>
+    <li class="{{ 'ok-line' if st.key_login_ok else 'warn-line' }}">
+      {% if st.key_login_ok %}Anmeldung als root per Schlüssel hat in den letzten {{ st.keyonly_days }} Tagen funktioniert
+      {% else %}Noch keine Anmeldung als root per Schlüssel in den letzten {{ st.keyonly_days }} Tagen{% endif %}</li>
+    <li class="{{ 'ok-line' if keyonly else 'warn-line' }}">
+      {% if keyonly %}Root kann sich nicht mehr mit Passwort per SSH anmelden (PermitRootLogin {{ eff.permitrootlogin }})
+      {% else %}Root darf sich per SSH mit Passwort anmelden (PermitRootLogin {{ eff.permitrootlogin or '?' }}){% endif %}</li>
+    {% if st.failed_root_7d %}<li class="warn-line">{{ st.failed_root_7d }} fehlgeschlagene Passwort-Versuche für root in den letzten 7 Tagen – das sind Angreifer, die Passwörter raten.</li>{% endif %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="setting" id="prinzip">
+  <h2>So funktioniert es</h2>
+  <p>Ein SSH-Schlüssel besteht aus zwei Teilen:</p>
+  <ul>
+    <li><b>Privater Schlüssel</b> – bleibt auf deinem Gerät, wie ein Haustürschlüssel. Ihn gibst du nie weiter und fügst ihn nirgends ein.</li>
+    <li><b>Öffentlicher Schlüssel</b> (Endung <code>.pub</code>, eine Zeile, beginnt mit <code>ssh-ed25519</code>) – kommt auf den Server, wie das Schloss. Er ist nicht geheim.</li>
+  </ul>
+  <p><b>Mehrere Computer?</b> Du überträgst keinen Schlüssel von Gerät zu Gerät. Jedes Gerät – Laptop, Büro-PC, Mac, iPad mit WebSSH –
+    erzeugt seinen <em>eigenen</em> Schlüssel, und du trägst hier einfach mehrere öffentliche Schlüssel ein. Geht ein Gerät verloren,
+    entfernst du nur dessen Schlüssel; alle anderen funktionieren weiter.</p>
+  <p class="muted small">Das Passwort von root bleibt gültig – für Webmin/Virtualmin, die Konsole deines Anbieters und <code>sudo</code>.
+    Nur die Anmeldung per SSH mit Passwort wird am Ende abgeschaltet.</p>
+</section>
+
+<section class="setting" id="erzeugen">
+  <h2>1. Schlüssel erzeugen – auf jedem Gerät einmal</h2>
+  <p class="small">Gib jedem Schlüssel einen Namen, an dem du das Gerät erkennst (<code>-C "…"</code>). Die Frage nach dem Speicherort mit Enter bestätigen.
+    Eine <b>Passphrase</b> ist empfehlenswert: Sie schützt den Schlüssel, falls das Gerät gestohlen wird.</p>
+
+  <details class="howto" open>
+    <summary><b>Windows 10 / 11</b> (ohne Zusatzprogramm)</summary>
+    <ol>
+      <li>Start-Menü → „PowerShell“ öffnen.</li>
+      <li>Schlüssel erzeugen: {{ cmd('ssh-keygen -t ed25519 -C "christian-laptop"') }}</li>
+      <li>Öffentlichen Schlüssel anzeigen und kopieren: {{ cmd('Get-Content $env:USERPROFILE\\.ssh\\id_ed25519.pub | Set-Clipboard') }}
+        <br><span class="small muted">Er ist jetzt in der Zwischenablage – unten bei „2. Eintragen“ einfügen.</span></li>
+    </ol>
+  </details>
+
+  <details class="howto">
+    <summary><b>Mac</b> und <b>Linux</b></summary>
+    <ol>
+      <li>Terminal öffnen (Mac: Programme → Dienstprogramme → Terminal).</li>
+      <li>Schlüssel erzeugen: {{ cmd('ssh-keygen -t ed25519 -C "christian-mac"') }}</li>
+      <li>Öffentlichen Schlüssel kopieren – Mac: {{ cmd('pbcopy < ~/.ssh/id_ed25519.pub') }} Linux: {{ cmd('cat ~/.ssh/id_ed25519.pub') }}</li>
+      <li>Oder direkt auf den Server übertragen (fragt ein letztes Mal nach dem Passwort): {{ cmd('ssh-copy-id' ~ pp ~ ' root@' ~ fqdn) }}</li>
+    </ol>
+  </details>
+
+  <details class="howto">
+    <summary><b>WebSSH</b> (iPhone, iPad, Mac) und andere Apps</summary>
+    <ol>
+      <li>Bietet deine App das Erzeugen eines Schlüssels an, wähle <b>Ed25519</b>, und kopiere den angezeigten öffentlichen Schlüssel. Fertig – weiter mit „2. Eintragen“.</li>
+      <li>Sonst den Schlüssel für dieses Gerät auf dem Mac/PC erzeugen – mit eigenem Dateinamen, damit er sich nicht mit dem des Macs vermischt:
+        {{ cmd('ssh-keygen -t ed25519 -f $HOME/.ssh/id_ed25519_ipad -C "christian-ipad"') }}</li>
+      <li>Die <b>private</b> Datei <code>id_ed25519_ipad</code> (ohne .pub) per AirDrop, USB-Stick oder Dateien-App auf das Gerät bringen
+        und in der App importieren (Verbindung bearbeiten → Anmeldung mit Schlüssel statt Passwort → Schlüssel importieren). Danach die Kopie
+        auf dem Mac/PC löschen und auch nicht per Mail verschicken.</li>
+      <li>Den <b>öffentlichen</b> Teil <code>id_ed25519_ipad.pub</code> unten eintragen.</li>
+      <li class="small muted">Browserbasiertes WebSSH (Anmeldemaske mit Feld „Private Key“): dort die private Datei auswählen und ggf. die Passphrase eingeben.
+        Termius: Keychain → Generate Key. Die genauen Menünamen unterscheiden sich je nach App-Version.</li>
+    </ol>
+  </details>
+
+  <details class="howto">
+    <summary><b>PuTTY</b> (Windows)</summary>
+    <ol>
+      <li>PuTTYgen starten → unten „EdDSA“ (Ed25519) wählen → „Generate“ und Maus bewegen.</li>
+      <li>Passphrase eintragen → „Save private key“ (Datei .ppk gut aufheben).</li>
+      <li>Den Text im oberen Feld „Public key for pasting into OpenSSH authorized_keys file“ kopieren und unten eintragen.</li>
+      <li>In PuTTY: Connection → SSH → Auth → Credentials → die .ppk-Datei auswählen und die Sitzung speichern.</li>
+    </ol>
+  </details>
+</section>
+
+<section class="setting" id="eintragen">
+  <h2>2. Öffentlichen Schlüssel eintragen</h2>
+  <form method="post" action="{{ url_for('ssh_add') }}" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Öffentlicher Schlüssel (eine Zeile)
+      <textarea name="key" rows="3" maxlength="2900" spellcheck="false" autocomplete="off" required
+        placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… christian-laptop"></textarea>
+      <small class="muted">Wird in /root/.ssh/authorized_keys ergänzt; vorher legt ubusec eine Sicherung an. Private Schlüssel werden erkannt und abgewiesen.
+        Auch das PuTTY-Format („---- BEGIN SSH2 PUBLIC KEY ----“) wird angenommen.</small></label>
+    <div><button class="btn btn-primary">Eintragen</button></div>
+  </form>
+
+  <h3 id="schluessel">Eingetragene Schlüssel</h3>
+  {% if keys %}
+  <table>
+    <thead><tr><th>Name</th><th>Typ</th><th>Fingerabdruck</th><th></th></tr></thead>
+    <tbody>
+    {% for k in keys %}
+      <tr>
+        <td>{{ k.comment or '–' }}{% if k.restricted %} <span class="muted small">(eingeschränkt)</span>{% endif %}</td>
+        <td>{{ k.type }}{% if k.bits and k.type == 'RSA' %} {{ k.bits }}{% endif %}{% if not k.valid %} <span class="warn-line small">ungültig</span>{% endif %}</td>
+        <td><code class="small">{{ k.fp or '–' }}</code></td>
+        <td>{% if k.fp %}
+          <form method="post" action="{{ url_for('ssh_del') }}" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="fp" value="{{ k.fp }}">
+            <button class="btn btn-quiet" data-confirm="Schlüssel „{{ k.comment or k.fp }}“ entfernen? Dieses Gerät kann sich danach nicht mehr als root per Schlüssel anmelden.">Entfernen</button>
+          </form>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted small">Den Fingerabdruck deines Schlüssels zeigt auf dem Gerät: <code>ssh-keygen -lf ~/.ssh/id_ed25519.pub</code></p>
+  {% elif st %}
+    <p class="muted">Noch keine Schlüssel für root eingetragen.</p>
+  {% endif %}
+</section>
+
+<section class="setting" id="anmeldungen">
+  <h2>3. Testen – von jedem Gerät aus</h2>
+  <ol>
+    <li>Ein <b>neues</b> Terminal-Fenster bzw. eine neue WebSSH-Verbindung öffnen. Die bisherige Sitzung offen lassen.</li>
+    <li>Anmelden: {{ cmd('ssh' ~ pp ~ ' root@' ~ fqdn) }}</li>
+    <li>Es darf <b>nicht</b> nach dem Server-Passwort gefragt werden – höchstens nach der Passphrase deines Schlüssels.
+      Wirst du doch nach dem Passwort gefragt, nimmt das Programm den Schlüssel nicht (Datei/Import prüfen).</li>
+    <li>Danach hier „Aktualisieren“ – die Anmeldung erscheint in der Liste mit dem Namen des Schlüssels.</li>
+  </ol>
+  <form method="post" action="{{ url_for('ssh_refresh') }}" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn">Aktualisieren</button>
+    {% if st.time %}<span class="muted small">Stand {{ st.time | ago }}</span>{% endif %}
+  </form>
+  <h3>Letzte Anmeldungen als root</h3>
+  {% if st.logins %}
+  <table>
+    <thead><tr><th>Zeit</th><th>Art</th><th>Schlüssel</th><th>von</th></tr></thead>
+    <tbody>
+    {% for l in st.logins[:15] %}
+      <tr><td>{{ l.time[:16] | replace('T', ' ') }}</td>
+          <td>{% if l.method == 'Schlüssel' %}<span class="ok-line">Schlüssel</span>{% else %}Passwort{% endif %}</td>
+          <td>{{ l.key or '–' }}</td><td><code class="small">{{ l.ip }}</code></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% elif st %}
+    <p class="muted">Keine Anmeldungen als root in den letzten 60 Tagen im Protokoll gefunden.</p>
+  {% endif %}
+</section>
+
+<section class="setting" id="umstellen">
+  <h2>4. Passwort-Login für root abschalten</h2>
+  <p>Wenn sich <b>alle Geräte</b>, die du nutzt, per Schlüssel anmelden können, stellt ubusec SSH auf
+    <code>PermitRootLogin prohibit-password</code> um: root kommt dann nur noch mit Schlüssel herein, Passwort-Raten ist zwecklos.
+    Bestehende Sitzungen bleiben offen.</p>
+  <p class="small">Auch der Tunnel zur Weboberfläche ({{ cmd('ssh' ~ pp ~ ' -L 8765:127.0.0.1:8765 root@' ~ fqdn) }}) nutzt danach automatisch den Schlüssel.</p>
+  <div class="fixbox">
+  <div class="fix-item" data-fid="{{ fix_id }}" data-pending="{{ 1 if fix_pending else 0 }}">
+    {% if fix_pending %}
+      <p class="muted">Wird ausgeführt …</p>
+    {% else %}
+      {% if fix %}
+        <p class="fix-res fix-{{ fix.status }}">{{ {'applied': '✓ Umgestellt:', 'nothing': '✓', 'undone': '↺', 'refused': '! Nicht umgestellt:', 'failed': '✗', 'rolledback': '✗ Zurückgenommen:'}[fix.status] }} {{ fix.message }}
+          <br><span class="small muted">{{ fix.time | ago }}</span></p>
+        {% if fix.lines %}<pre class="fix-lines">{{ fix.lines | join('\n') }}</pre>{% endif %}
+      {% endif %}
+      <form method="post" action="{{ url_for('ssh_switch') }}" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        {% if fix and fix.status == 'applied' and st.keyonly_file %}
+          <button class="btn btn-quiet" name="op" value="undo" data-confirm="Root-Login mit Passwort wieder erlauben?">Rückgängig machen</button>
+        {% elif keyonly %}
+          <p class="ok-line">Bereits umgestellt.</p>
+        {% else %}
+          <button class="btn {{ 'btn-primary' if st.key_login_ok else '' }}" name="op" value="apply"
+            data-confirm="Root-Login per SSH nur noch mit Schlüssel erlauben? Bitte danach sofort in einem NEUEN Fenster anmelden und testen. Bestehende Sitzungen bleiben offen.">Jetzt umstellen</button>
+          {% if not st.key_login_ok %}<span class="small muted">Geht erst, wenn du dich einmal per Schlüssel als root angemeldet hast (Schritt 3).</span>{% endif %}
+        {% endif %}
+      </form>
+    {% endif %}
+  </div>
+  </div>
+  <p class="muted small">Von Hand wäre es:
+    <code>echo 'PermitRootLogin prohibit-password' | sudo tee /etc/ssh/sshd_config.d/00-ubusec-root.conf &amp;&amp; sudo sshd -t &amp;&amp; sudo systemctl reload ssh</code></p>
+</section>
+
+<section class="setting" id="notfall">
+  <h2>Notfall: ausgesperrt?</h2>
+  <p>Kein Grund zur Panik – das Root-Passwort gilt weiterhin überall außer bei SSH.</p>
+  <ol>
+    <li>Im Kundenbereich deines Anbieters die <b>Konsole</b> (VNC/„Bildschirm“) öffnen und dort als root mit Passwort anmelden –
+      oder in <b>Webmin → Werkzeuge → Terminal</b> (Tools → Terminal).</li>
+    <li>Die Umstellung zurücknehmen: {{ cmd('rm /etc/ssh/sshd_config.d/00-ubusec-root.conf && systemctl reload ssh') }}</li>
+    <li>Danach geht die SSH-Anmeldung mit Passwort wieder; dann in Ruhe den Schlüssel prüfen.</li>
+  </ol>
+  <p class="small"><b>Neues Gerät später hinzufügen:</b> auf dem neuen Gerät Schritt 1, den öffentlichen Schlüssel (z. B. per Mail an dich selbst – er ist nicht geheim)
+    von einem Gerät mit Zugang aus hier eintragen, testen. <b>Gerät verloren:</b> hier dessen Schlüssel entfernen.</p>
+  <p class="muted small">Dieselbe Anleitung auf der Kommandozeile: <code>ubusec --ssh-help</code>.
+    Sicherungen der Schlüsseldatei: /var/lib/ubusec/ssh-backup/.</p>
+</section>
+{% endblock %}
