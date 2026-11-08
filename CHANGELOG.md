@@ -2,10 +2,13 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.2 – 2026-11-08
+
+- **Neutrale Beispiele:** Anleitung „SSH-Schlüssel“ (Weboberfläche und `ubusec --ssh-help`): Beispielnamen neutral (mein-laptop, mein-mac,
+  mein-ipad); der Servername wird weiterhin automatisch vom jeweiligen Server eingesetzt. README: Beispiel-Benutzer „anna“.
+
 ## 1.5.1 – 2026-11-08
 
-- Anleitung „SSH-Schlüssel“ (Weboberfläche und `ubusec --ssh-help`): Beispielnamen neutral (mein-laptop, mein-mac,
-  mein-ipad); der Servername wird weiterhin automatisch vom jeweiligen Server eingesetzt.
 - **Fehler behoben:** „KI-Fassung herunterladen“ und „Zuordnung der Platzhalter“ brachen mit „Internal Server Error“
   ab. Die Weboberfläche läuft abgeschottet (ProtectHome) und darf /home nicht lesen; die Benutzernamen kommen jetzt
   nur aus /etc/passwd.
