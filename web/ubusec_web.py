@@ -1943,8 +1943,36 @@ def create_app():
         except OSError:
             log = ""
         conf = read_json(os.path.join(STATE_DIR, "settings.json"), {}) or {}
+        # Ergebnis der letzten Aktion nur einen Tag lang hervorheben
+        if state.get("running") or time.time() - state.get("time", 0) > 86400:
+            state["result"] = ""
+        # AIDE-Datenbank: Fortschritt live (nicht erst nach der nächsten Werkzeugprüfung)
+        aide = read_json(os.path.join(STATE_DIR, "aide-init.json"), None) or {}
+        if aide.get("state") == "running":
+            alive = False
+            try:
+                pid = int(open(os.path.join(STATE_DIR, "aide-init.running")).read().strip())
+                os.kill(pid, 0)
+                alive = True
+            except PermissionError:      # Prozess gehört root – er läuft also
+                alive = True
+            except (OSError, ValueError):
+                alive = False
+            if not alive:
+                aide["state"] = "aborted"
+            aide["minutes"] = int((time.time() - aide.get("started", time.time())) / 60)
+        elif aide.get("finished"):
+            aide["minutes"] = max(1, int((aide["finished"] - aide.get("started", aide["finished"])) / 60))
+            if time.time() - aide["finished"] > 7 * 86400 and aide.get("state") == "ok":
+                aide = {}
+        if aide.get("state") in ("failed", "aborted"):
+            try:
+                with open(os.path.join(LOG_DIR, "aide-init.log"), encoding="utf-8", errors="replace") as f:
+                    aide["log"] = f.read()[-3000:]
+            except OSError:
+                aide["log"] = ""
         return render_template("tools.html", data=data, tools=data.get("tools", []), me=data.get("ubusec", {}),
-                               upd=state, log=log, status=read_status(), conf=conf)
+                               upd=state, log=log, status=read_status(), conf=conf, aide=aide)
 
     @app.route("/werkzeuge/<aktion>", methods=["POST"])
     def tools_action(aktion):

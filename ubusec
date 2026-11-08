@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.2"
+UBUSEC_VERSION="1.5.3"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -690,7 +690,7 @@ mod_integrity() {
 
   if have aide; then
     local db=/var/lib/aide/aide.db rc
-    if [ -f "$STATE_DIR/aide-init.running" ] && kill -0 "$(cat "$STATE_DIR/aide-init.running" 2>/dev/null)" 2>/dev/null; then
+    if aide_aktiv; then
       add INFO integrity "AIDE legt gerade seine Datenbank an – die Prüfung beginnt mit dem nächsten Vollscan danach"
     elif [ -f "$db" ] && [ "$MODE" != full ] && [ "${AIDE_QUICK:-0}" != 1 ]; then
       add INFO integrity "AIDE prüft beim Vollscan (dauert auf großen Servern länger; für den Schnellscan: AIDE_QUICK=1)"
@@ -1931,9 +1931,9 @@ audit() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG_DIR/web-audit.log"; }
 # ---------------------------------------------------------- Werkzeuge ---
 TOOL_PKGS="clamav clamav-freshclam clamav-daemon rkhunter chkrootkit lynis openscap-scanner libopenscap8 unhide needrestart bind9-dnsutils testssl.sh aide aide-common python3-flask python3-waitress qrencode"
 
-tools_state() { # tools_state true|false aktion
+tools_state() { # tools_state true|false aktion [ok|failed]  – das Ergebnis zeigt die Seite „Werkzeuge“ an
   local f=$STATE_DIR/tools-update.state
-  printf '{"running":%s,"action":"%s","time":%s}\n' "$1" "$2" "$(date +%s)" >"$f.tmp"
+  printf '{"running":%s,"action":"%s","time":%s,"result":"%s"}\n' "$1" "$2" "$(date +%s)" "${3:-}" >"$f.tmp"
   chgrp "$(grp)" "$f.tmp"; chmod 640 "$f.tmp"; mv -f "$f.tmp" "$f"
 }
 
@@ -1954,8 +1954,19 @@ aide_excludes() {
   } >"$f.tmp"
   chmod 644 "$f.tmp"; mv -f "$f.tmp" "$f"
 }
+aide_aktiv() { [ -f "$STATE_DIR/aide-init.running" ] && kill -0 "$(cat "$STATE_DIR/aide-init.running" 2>/dev/null)" 2>/dev/null; }
 aide_init_bg() { # Datenbank im Hintergrund anlegen (kann auf großen Servern lange dauern)
-  local cmd="aideinit -y -f >$LOG_DIR/aide-init.log 2>&1; [ -f /var/lib/aide/aide.db.new ] && cp /var/lib/aide/aide.db.new /var/lib/aide/aide.db; rm -f $STATE_DIR/aide-init.running"
+  # Fortschritt für die Weboberfläche: $STATE_DIR/aide-init.json (running → ok|failed), Protokoll: $LOG_DIR/aide-init.log
+  if aide_aktiv; then echo "AIDE legt die Datenbank bereits an."; return 0; fi
+  local j=$STATE_DIR/aide-init.json g; g=$(grp)
+  local cmd="t0=\$(date +%s); printf '{\"state\":\"running\",\"started\":%s}' \$t0 >$j; chgrp $g $j; chmod 640 $j
+    aideinit -y -f >$LOG_DIR/aide-init.log 2>&1; rc=\$?
+    if [ -f /var/lib/aide/aide.db.new ]; then cp /var/lib/aide/aide.db.new /var/lib/aide/aide.db; st=ok; else st=failed; fi
+    sz=\$(stat -c %s /var/lib/aide/aide.db 2>/dev/null || echo 0)
+    printf '{\"state\":\"%s\",\"started\":%s,\"finished\":%s,\"rc\":%s,\"db_bytes\":%s}' \$st \$t0 \$(date +%s) \$rc \$sz >$j
+    chgrp $g $j $LOG_DIR/aide-init.log; chmod 640 $j $LOG_DIR/aide-init.log
+    rm -f $STATE_DIR/aide-init.running
+    UBUSEC_FORCE_CHECK=1 $INSTALL_PATH --check-tools >/dev/null 2>&1"
   if have systemd-run; then
     systemctl reset-failed ubusec-aide-init.service 2>/dev/null
     systemd-run --unit=ubusec-aide-init --quiet -p Nice=19 -p IOSchedulingClass=idle -p CPUWeight=20 \
@@ -1963,6 +1974,7 @@ aide_init_bg() { # Datenbank im Hintergrund anlegen (kann auf großen Servern la
   else
     nohup /bin/bash -c "echo \$\$ >$STATE_DIR/aide-init.running; $cmd" >/dev/null 2>&1 &
   fi
+  sleep 1; UBUSEC_FORCE_CHECK=1 check_tools >/dev/null   # Seite „Werkzeuge“ zeigt sofort „wird eingerichtet“
 }
 MALDET_URL=https://www.rfxn.com/downloads/maldet-current.tar.gz
 install_optional() { # install_optional aide|maldet
@@ -2016,7 +2028,7 @@ install_optional() { # install_optional aide|maldet
   [ $rc = 0 ] || echo "=== FEHLER – siehe oben" >>"$log"
   chgrp "$(grp)" "$log"; chmod 640 "$log"
   check_tools >/dev/null
-  tools_state false "install-$tool"
+  tools_state false "install-$tool" "$([ $rc = 0 ] && echo ok || echo failed)"
   return $rc
 }
 
@@ -2051,7 +2063,7 @@ update_tools() { # Updates nur für ubusecs eigene Werkzeuge + frische Signature
   } >"$log" 2>&1
   chgrp "$(grp)" "$log"; chmod 640 "$log"
   check_tools >/dev/null
-  tools_state false update
+  tools_state false update "$(grep -q '^=== fertig' "$log" && echo ok || echo failed)"
 }
 
 CISOFY_KEY_URL=https://packages.cisofy.com/keys/cisofy-software-public.key
@@ -2131,7 +2143,7 @@ lynis_upstream() { # aktuelle Lynis-Version aus der Paketquelle des Herstellers 
   [ $rc = 0 ] || echo "=== FEHLER – siehe oben" >>"$log"
   chgrp "$(grp)" "$log"; chmod 640 "$log"
   check_tools >/dev/null
-  tools_state false lynis
+  tools_state false lynis "$([ $rc = 0 ] && echo ok || echo failed)"
   return $rc
 }
 

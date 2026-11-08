@@ -10,6 +10,35 @@
   {{ {'update': 'Die Werkzeuge werden aktualisiert', 'lynis': 'Die Lynis-Paketquelle wird eingerichtet', 'install-aide': 'AIDE wird installiert', 'install-maldet': 'Linux Malware Detect wird installiert'}.get(upd.action, 'Die Werkzeuge werden geprüft') }} … die Seite aktualisiert sich von selbst.</p>
 {% endif %}
 
+{% if upd.result and not status.ctl_pending %}
+  {% set what = {'install-aide': 'AIDE: Installation', 'install-maldet': 'Linux Malware Detect: Installation', 'update': 'Aktualisierung der Werkzeuge', 'lynis': 'Einrichtung der Lynis-Paketquelle'}.get(upd.action, 'Aktion') %}
+  {% if upd.result == 'ok' %}
+  <p class="flash flash-ok">✓ {{ what }} erfolgreich abgeschlossen ({{ upd.time | ago }}).
+    {% if upd.action == 'install-maldet' %} Linux Malware Detect prüft ab dem nächsten Vollscan die Webordner; Signaturen und Programm aktualisiert es selbst.
+    {% elif upd.action == 'install-aide' %} Jetzt wird die AIDE-Datenbank angelegt (siehe unten).{% endif %}</p>
+  {% else %}
+  <p class="flash flash-error">✗ {{ what }} fehlgeschlagen ({{ upd.time | ago }}). Die Ursache steht im Protokoll weiter unten.</p>
+  {% endif %}
+{% endif %}
+
+{% if aide.state == 'running' %}
+<div class="flash flash-info" id="aide-running" data-reload="30">
+  <b>AIDE legt gerade seine Datenbank an</b> – läuft seit {{ aide.minutes }} Min.<br>
+  Je nach Datenmenge dauert das 10 bis 60 Minuten. Es läuft mit niedriger Priorität im Hintergrund, die Websites bleiben
+  normal erreichbar. Du kannst die Seite schließen – hier steht, sobald es fertig ist (die Seite aktualisiert sich alle 30 Sekunden).
+</div>
+{% elif aide.state == 'ok' %}
+<p class="flash flash-ok">✓ <b>AIDE ist eingerichtet:</b> Datenbank {{ aide.finished | ago }} in {{ aide.minutes }} Min. angelegt
+  ({{ '%.1f' | format(aide.db_bytes / 1048576) }} MB). Ab dem nächsten Vollscan meldet ubusec jede Änderung an Systemdateien seit
+  diesem Stand. Nach Updates oder gewollten Änderungen im Befund „Baseline übernehmen“.</p>
+{% elif aide.state in ('failed', 'aborted') %}
+<div class="flash flash-error">
+  ✗ <b>Die AIDE-Datenbank konnte nicht angelegt werden</b>{% if aide.state == 'aborted' %} – der Vorgang wurde abgebrochen (z. B. durch einen Neustart oder zu wenig Arbeitsspeicher){% endif %}.
+  Mit „AIDE einrichten“ kannst du es erneut versuchen.
+  {% if aide.log %}<details><summary>Protokoll</summary><pre class="raw">{{ aide.log }}</pre></details>{% endif %}
+</div>
+{% endif %}
+
 {% if not tools %}
   <p class="empty-line">Noch keine Prüfung vorhanden.</p>
 {% else %}
@@ -26,9 +55,9 @@
         {% if t.upstream %}<br><span class="muted small">Hersteller: {{ t.upstream }}{% if t.upstream_repo %} (Quelle eingerichtet){% endif %}</span>{% endif %}</td>
     <td>{% if t.data %}{{ t.data }}<br><span class="muted small">{% if t.data_age is none %}keine Daten{% elif t.data_age < 1 %}heute aktualisiert{% else %}vor {{ t.data_age | round(0, 'floor') | int }} Tagen{% endif %}</span>{% else %}<span class="muted">–</span>{% endif %}
         {% if t.note %}<br><span class="muted small">{{ t.note }}</span>{% endif %}</td>
-    <td><span class="tstate">{{ {'ok': 'aktuell', 'update': 'Update verfügbar', 'veraltet': 'veraltet', 'fehlt': 'nicht installiert'}[st] if not (t.name == 'AIDE' and t.present and not t.aide_db) else ('wird eingerichtet' if t.aide_init else 'nicht eingerichtet') }}</span></td>
+    <td><span class="tstate">{{ {'ok': 'aktuell', 'update': 'Update verfügbar', 'veraltet': 'veraltet', 'fehlt': 'nicht installiert'}[st] if not (t.name == 'AIDE' and t.present and (not t.aide_db or aide.state == 'running')) else ('wird eingerichtet' if (t.aide_init or aide.state == 'running') else 'nicht eingerichtet') }}</span></td>
   </tr>
-  {% if t.benefit and (not t.present or (t.name == 'AIDE' and not t.aide_db and not t.aide_init)) %}
+  {% if t.benefit and (not t.present or (t.name == 'AIDE' and not t.aide_db and not t.aide_init and aide.state != 'running')) %}
   <tr class="tool-offer"><td colspan="5">
     <div class="fixbox">
       <p><b>{{ 'Soll ubusec ' ~ t.name ~ ' für dich ' ~ ('einrichten' if t.present else 'installieren') ~ '?' }}</b><br>
@@ -66,7 +95,7 @@
 <p class="muted small">„Werkzeuge aktualisieren“ spielt nur Updates für ClamAV, rkhunter, chkrootkit, Lynis, OpenSCAP, unhide, needrestart, dig, testssl.sh, AIDE und die Weboberfläche ein und lädt neue Virensignaturen. Alle anderen Updates deines Servers zeigt der Bereich „Updates & Neustarts“.</p>
 
 {% if log %}
-<details class="rawlist" {% if upd.running %}open{% endif %}>
+<details class="rawlist" {% if upd.running or upd.result == 'failed' %}open{% endif %}>
   <summary>Protokoll der letzten Aktualisierung</summary>
   <pre class="raw">{{ log }}</pre>
 </details>

@@ -2,6 +2,16 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.3 – 2026-11-08
+
+- **Werkzeuge: sichtbare Rückmeldung.** Nach „AIDE installieren“, „Linux Malware Detect installieren“, „Werkzeuge
+  aktualisieren“ und „Lynis-Paketquelle einrichten“ zeigt die Seite einen Tag lang, ob es geklappt hat (bei Fehlern
+  mit geöffnetem Protokoll).
+- **AIDE einrichten: Fortschritt live.** Während die Datenbank angelegt wird, steht dort „läuft seit … Min.“ (die Seite
+  aktualisiert sich alle 30 Sekunden), danach „AIDE ist eingerichtet“ mit Dauer und Größe – oder der Fehler mit
+  Protokoll, auch wenn der Vorgang z. B. durch einen Neustart abgebrochen wurde. Der Knopf „AIDE einrichten“
+  verschwindet, solange es läuft; ein zweiter Start wird abgefangen. Am Ende wird die Werkzeugliste neu geprüft.
+
 ## 1.5.2 – 2026-11-08
 
 - **Neutrale Beispiele:** Anleitung „SSH-Schlüssel“ (Weboberfläche und `ubusec --ssh-help`): Beispielnamen neutral (mein-laptop, mein-mac,

@@ -68,6 +68,10 @@
     setTimeout(poll, 2000);
   });
 
+  // Seiten mit lang laufenden Hintergrundaufgaben (z. B. AIDE-Datenbank) regelmäßig neu laden
+  const rl = document.querySelector("[data-reload]");
+  if (rl) setTimeout(() => location.reload(), (parseInt(rl.dataset.reload, 10) || 30) * 1000);
+
   // SSH-Schlüssel: warten, bis root die Daten geliefert hat
   const sshp = document.getElementById("ssh-pending");
   if (sshp) {
