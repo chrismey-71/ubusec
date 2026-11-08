@@ -2,7 +2,7 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
-## Unveröffentlicht
+## 1.5.0 – 2026-11-08
 
 - Prüfung „Automatische Sicherheitsupdates“: erkennt auch Werte wie „1d“ oder „always“, prüft zusätzlich den
   systemd-Timer apt-daily-upgrade und nennt im Befund den genauen Grund (Paket fehlt, Schalter in 20auto-upgrades
