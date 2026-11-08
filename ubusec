@@ -2672,17 +2672,17 @@ WIE ES FUNKTIONIERT
 
 1. SCHLÜSSEL ERZEUGEN (auf jedem Gerät einmal)
   Windows 10/11 – PowerShell öffnen (Start → „PowerShell“):
-      ssh-keygen -t ed25519 -C "christian-laptop"
+      ssh-keygen -t ed25519 -C "mein-laptop"
       (Enter für den Speicherort; dann eine Passphrase wählen – sie schützt den Schlüssel, falls das
        Gerät gestohlen wird)
       Öffentlichen Schlüssel anzeigen:   type \$env:USERPROFILE\\.ssh\\id_ed25519.pub
   Mac / Linux – Terminal öffnen:
-      ssh-keygen -t ed25519 -C "christian-mac"
+      ssh-keygen -t ed25519 -C "mein-mac"
       cat ~/.ssh/id_ed25519.pub
   WebSSH (iPhone/iPad/Mac) und andere Apps (Termius, PuTTY):
       Bietet die App „Schlüssel erzeugen“ an, nimm Ed25519 und kopiere den öffentlichen Teil.
       Sonst auf dem Mac/PC einen EIGENEN Schlüssel für dieses Gerät erzeugen, z. B.
-          ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_ipad -C "christian-ipad"
+          ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_ipad -C "mein-ipad"
       die PRIVATE Datei id_ed25519_ipad (ohne .pub) per AirDrop/USB auf das Gerät bringen, in der App
       importieren (Verbindung bearbeiten → Anmeldung per Schlüssel statt Passwort) und die Kopie danach
       vom Mac/PC löschen. Browser-WebSSH: die private Datei im Feld „Private Key“ auswählen.
@@ -2693,7 +2693,7 @@ WIE ES FUNKTIONIERT
   Oder vom Mac/Linux aus:      ssh-copy-id$pp root@$h
   Oder auf dem Server von Hand:
       sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
-      echo 'ssh-ed25519 AAAA… christian-laptop' | sudo tee -a /root/.ssh/authorized_keys
+      echo 'ssh-ed25519 AAAA… mein-laptop' | sudo tee -a /root/.ssh/authorized_keys
       sudo chmod 600 /root/.ssh/authorized_keys
   NIE den privaten Schlüssel (-----BEGIN OPENSSH PRIVATE KEY-----) irgendwo einfügen.
 

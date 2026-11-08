@@ -62,7 +62,7 @@
     <summary><b>Windows 10 / 11</b> (ohne Zusatzprogramm)</summary>
     <ol>
       <li>Start-Menü → „PowerShell“ öffnen.</li>
-      <li>Schlüssel erzeugen: {{ cmd('ssh-keygen -t ed25519 -C "christian-laptop"') }}</li>
+      <li>Schlüssel erzeugen: {{ cmd('ssh-keygen -t ed25519 -C "mein-laptop"') }}</li>
       <li>Öffentlichen Schlüssel anzeigen und kopieren: {{ cmd('Get-Content $env:USERPROFILE\\.ssh\\id_ed25519.pub | Set-Clipboard') }}
         <br><span class="small muted">Er ist jetzt in der Zwischenablage – unten bei „2. Eintragen“ einfügen.</span></li>
     </ol>
@@ -72,7 +72,7 @@
     <summary><b>Mac</b> und <b>Linux</b></summary>
     <ol>
       <li>Terminal öffnen (Mac: Programme → Dienstprogramme → Terminal).</li>
-      <li>Schlüssel erzeugen: {{ cmd('ssh-keygen -t ed25519 -C "christian-mac"') }}</li>
+      <li>Schlüssel erzeugen: {{ cmd('ssh-keygen -t ed25519 -C "mein-mac"') }}</li>
       <li>Öffentlichen Schlüssel kopieren – Mac: {{ cmd('pbcopy < ~/.ssh/id_ed25519.pub') }} Linux: {{ cmd('cat ~/.ssh/id_ed25519.pub') }}</li>
       <li>Oder direkt auf den Server übertragen (fragt ein letztes Mal nach dem Passwort): {{ cmd('ssh-copy-id' ~ pp ~ ' root@' ~ fqdn) }}</li>
     </ol>
@@ -83,7 +83,7 @@
     <ol>
       <li>Bietet deine App das Erzeugen eines Schlüssels an, wähle <b>Ed25519</b>, und kopiere den angezeigten öffentlichen Schlüssel. Fertig – weiter mit „2. Eintragen“.</li>
       <li>Sonst den Schlüssel für dieses Gerät auf dem Mac/PC erzeugen – mit eigenem Dateinamen, damit er sich nicht mit dem des Macs vermischt:
-        {{ cmd('ssh-keygen -t ed25519 -f $HOME/.ssh/id_ed25519_ipad -C "christian-ipad"') }}</li>
+        {{ cmd('ssh-keygen -t ed25519 -f $HOME/.ssh/id_ed25519_ipad -C "mein-ipad"') }}</li>
       <li>Die <b>private</b> Datei <code>id_ed25519_ipad</code> (ohne .pub) per AirDrop, USB-Stick oder Dateien-App auf das Gerät bringen
         und in der App importieren (Verbindung bearbeiten → Anmeldung mit Schlüssel statt Passwort → Schlüssel importieren). Danach die Kopie
         auf dem Mac/PC löschen und auch nicht per Mail verschicken.</li>
@@ -110,7 +110,7 @@
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>Öffentlicher Schlüssel (eine Zeile)
       <textarea name="key" rows="3" maxlength="2900" spellcheck="false" autocomplete="off" required
-        placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… christian-laptop"></textarea>
+        placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… mein-laptop"></textarea>
       <small class="muted">Wird in /root/.ssh/authorized_keys ergänzt; vorher legt ubusec eine Sicherung an. Private Schlüssel werden erkannt und abgewiesen.
         Auch das PuTTY-Format („---- BEGIN SSH2 PUBLIC KEY ----“) wird angenommen.</small></label>
     <div><button class="btn btn-primary">Eintragen</button></div>

@@ -130,8 +130,8 @@ und einen schwer erratbaren Themennamen abonnieren.
 ## Benutzer verwalten
 
 ```bash
-sudo ubusec --web-user christian --totp   # anlegen oder Passwort ändern, mit 2-Faktor
-sudo ubusec --web-user-del christian
+sudo ubusec --web-user anna --totp   # anlegen oder Passwort ändern, mit 2-Faktor
+sudo ubusec --web-user-del anna
 ```
 
 ## Kommandozeile
