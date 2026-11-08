@@ -2,6 +2,19 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.1 – 2026-11-08
+
+- **Fehler behoben:** „KI-Fassung herunterladen“ und „Zuordnung der Platzhalter“ brachen mit „Internal Server Error“
+  ab. Die Weboberfläche läuft abgeschottet (ProtectHome) und darf /home nicht lesen; die Benutzernamen kommen jetzt
+  nur aus /etc/passwd.
+- **Empfehlungen als Excel-Datei (.xlsx)** statt CSV: Kopfzeile fixiert, Filter in jeder Spalte, Farben je Schwere,
+  Zeilenumbrüche in den Zellen, Spalte „Status“ mit Auswahlliste (offen, in Arbeit, erledigt, ignoriert) – „erledigt“
+  färbt die Zeile grün und streicht sie durch –, Spalte „Notiz“, Lynis-Vorschläge auf einem eigenen Blatt, druckfertig
+  im Querformat. Ohne Zusatzpakete erzeugt; öffnet in Excel, LibreOffice und Numbers.
+- **SSH-Passwort-Anmeldung genauer bewertet:** Ist root schon auf Schlüssel umgestellt, meldet ubusec nur noch
+  NIEDRIG „Passwort-Anmeldung für andere Benutzer aktiv“ und nennt die Benutzer, die sich noch mit Passwort anmelden
+  können (Passwort gesetzt und Login-Shell). Gibt es keine, entfällt die Meldung.
+
 ## 1.5.0 – 2026-11-08
 
 - **SSH-Schlüssel einrichten, ohne sich auszusperren:** neue Seite „SSH-Schlüssel“ (Einstellungen bzw. Knopf am

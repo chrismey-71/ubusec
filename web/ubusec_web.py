@@ -710,19 +710,168 @@ def export_markdown(c):
     return "\n".join(L)
 
 
-def export_csv(c):
-    import csv
+def _xml(t):
+    t = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(t))
+    return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _col(n):
+    s = ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def _sheet(rows, widths, styles, status_col=True, title_rows=0):
+    """Ein Arbeitsblatt als XML. rows: Liste von Zeilen, jede Zelle (Text, Stilnummer)."""
+    ncol = len(widths)
+    hdr = title_rows + 1
+    last = len(rows)
+    out = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+           '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+           'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+           '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>',
+           '<dimension ref="A1:%s%d"/>' % (_col(ncol), max(last, 1)),
+           '<sheetViews><sheetView workbookViewId="0"><pane ySplit="%d" topLeftCell="A%d" activePane="bottomLeft" '
+           'state="frozen"/></sheetView></sheetViews>' % (hdr, hdr + 1),
+           '<sheetFormatPr defaultRowHeight="15"/><cols>']
+    out += ['<col min="%d" max="%d" width="%s" customWidth="1"/>' % (i, i, w) for i, w in enumerate(widths, 1)]
+    out.append('</cols><sheetData>')
+    for r, row in enumerate(rows, 1):
+        cells = []
+        for ci, (val, st) in enumerate(row, 1):
+            if val == "" and not st:
+                continue
+            cells.append('<c r="%s%d" s="%d" t="inlineStr"><is><t xml:space="preserve">%s</t></is></c>'
+                         % (_col(ci), r, st, _xml(val)))
+        out.append('<row r="%d">%s</row>' % (r, "".join(cells)))
+    out.append('</sheetData>')
+    if last > hdr:
+        out.append('<autoFilter ref="A%d:%s%d"/>' % (hdr, _col(ncol), last))
+        if status_col:
+            out.append('<conditionalFormatting sqref="A%d:%s%d"><cfRule type="expression" dxfId="0" priority="1">'
+                       '<formula>$A%d="erledigt"</formula></cfRule><cfRule type="expression" dxfId="1" priority="2">'
+                       '<formula>$A%d="ignoriert"</formula></cfRule></conditionalFormatting>'
+                       % (hdr + 1, _col(ncol), last, hdr + 1, hdr + 1))
+            out.append('<dataValidations count="1"><dataValidation type="list" allowBlank="1" showErrorMessage="1" '
+                       'sqref="A%d:A%d"><formula1>"offen,in Arbeit,erledigt,ignoriert"</formula1></dataValidation>'
+                       '</dataValidations>' % (hdr + 1, last + 200))
+    out.append('<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>'
+               '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>')
+    return "".join(out)
+
+
+XLSX_STYLES = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    '<fonts count="4"><font><sz val="10"/><name val="Calibri"/></font>'
+    '<font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>'
+    '<font><b/><sz val="10"/><name val="Calibri"/></font>'
+    '<font><b/><sz val="14"/><name val="Calibri"/></font></fonts>'
+    '<fills count="8"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+    '<fill><patternFill patternType="solid"><fgColor rgb="FF2F3E4E"/></patternFill></fill>'
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFF4C7C3"/></patternFill></fill>'
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFFAD9C1"/></patternFill></fill>'
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFFFF0B3"/></patternFill></fill>'
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFDCE8F3"/></patternFill></fill>'
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFF2F2F2"/></patternFill></fill></fills>'
+    '<borders count="2"><border/><border><left/><right/><top/><bottom style="thin"><color rgb="FFD0D0D0"/></bottom>'
+    '<diagonal/></border></borders>'
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+    '<cellXfs count="10">'
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'                                   # 0
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1">'
+    '<alignment vertical="center" wrapText="1"/></xf>'                                                  # 1 Kopf
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1">'
+    '<alignment vertical="top" wrapText="1"/></xf>'                                                     # 2 Text
+    '<xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyAlignment="1">'
+    '<alignment vertical="top"/></xf>'                                                                  # 3 Kritisch
+    '<xf numFmtId="0" fontId="2" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyAlignment="1">'
+    '<alignment vertical="top"/></xf>'                                                                  # 4 Hoch
+    '<xf numFmtId="0" fontId="2" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyAlignment="1">'
+    '<alignment vertical="top"/></xf>'                                                                  # 5 Mittel
+    '<xf numFmtId="0" fontId="2" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyAlignment="1">'
+    '<alignment vertical="top"/></xf>'                                                                  # 6 Niedrig
+    '<xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1">'
+    '<alignment vertical="top" wrapText="1"/></xf>'                                                     # 7 fett
+    '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>'                       # 8 Titel
+    '<xf numFmtId="0" fontId="0" fillId="7" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1">'
+    '<alignment vertical="top"/></xf>'                                                                  # 9 Status
+    '</cellXfs><cellStyles count="1"><cellStyle name="Standard" xfId="0" builtinId="0"/></cellStyles>'
+    '<dxfs count="2"><dxf><font><strike/><color rgb="FF7F7F7F"/></font><fill><patternFill patternType="solid">'
+    '<bgColor rgb="FFE2EFDA"/></patternFill></fill></dxf>'
+    '<dxf><font><color rgb="FF9F9F9F"/></font></dxf></dxfs></styleSheet>')
+
+
+def export_xlsx(c):
+    """Excel-Datei (Office Open XML) ohne Zusatzbibliotheken: Kopfzeile fixiert, Filter, Farben je Schwere,
+    Spalte „Status“ mit Auswahlliste – „erledigt“ färbt die Zeile grün und streicht sie durch."""
     import io
-    buf = io.StringIO()
-    w = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL)
-    w.writerow(["Schweregrad", "Bereich", "Meldung", "Details", "Warum", "Behebung", "Aufwand", "Geprüft", "Neu", "Erledigt"])
-    for i in c["items"]:
-        w.writerow([SEV_NAME[i["severity"]], i["module"], i["message"], "\n".join(i["details"]), i["why"],
-                    "\n".join(t for t, _ in i["steps"]), i["effort"], i["checked"], "ja" if i["new"] else "", ""])
-    for x in c["lynis"]:
-        w.writerow(["Lynis", "Konfiguration & Härtung", x, "", "", "sudo lynis show details " + x.rsplit("[", 1)[-1].rstrip("]"),
-                    "", "", "", ""])
-    return "﻿" + buf.getvalue()   # BOM, damit Excel die Umlaute richtig liest
+    import zipfile
+    sev_style = {"KRITISCH": 3, "HOCH": 4, "MITTEL": 5, "NIEDRIG": 6}
+    title = "ubusec – Empfehlungen%s" % (" für " + c["host"] if c["host"] else "")
+    sub = "Erstellt am %s mit ubusec %s · Sicherheitswert %s von 100 · %s" % (
+        c["created"], VERSION, c["score"],
+        " · ".join("%s %d" % (SEV_NAME[s], c["counts"].get(s, 0)) for s in SEVERITIES if s != "INFO"))
+    head = ["Status", "Schwere", "Bereich", "Befund", "Details", "Warum wichtig", "So behebst du es", "Aufwand",
+            "Neu", "Geprüft", "Notiz"]
+    rows = [[(title, 8)], [(sub, 0)], [(h, 1) for h in head]]
+    order = {s: n for n, s in enumerate(SEVERITIES)}
+    for i in sorted(c["items"], key=lambda x: order.get(x["severity"], 9)):
+        steps = "\n".join(("$ " + t) if cmd else ("• " + t) for t, cmd in i["steps"])
+        det = i["details"][:15] + (["… und %d weitere" % (len(i["details"]) - 15)] if len(i["details"]) > 15 else [])
+        rows.append([("offen", 9), (SEV_NAME[i["severity"]], sev_style.get(i["severity"], 2)), (i["module"], 2),
+                     (i["message"], 7), ("\n".join(det), 2), (i["why"], 2), (steps, 2), (i["effort"], 2),
+                     ("neu" if i["new"] else "", 2), (i["checked"], 2), ("", 2)])
+    sheets = [("Empfehlungen", _sheet(rows, [11, 10, 16, 42, 50, 45, 60, 12, 6, 15, 30], None, True, 2))]
+    if c["lynis"]:
+        lr = [[("Härtungsvorschläge von Lynis", 8)], [("Details je Vorschlag: sudo lynis show details TEST-ID", 0)],
+              [(h, 1) for h in ("Status", "Vorschlag", "Befehl für Details", "Notiz")]]
+        for x in c["lynis"]:
+            tid = x.rsplit("[", 1)[-1].rstrip("]") if "[" in x else ""
+            lr.append([("offen", 9), (x, 2), ("sudo lynis show details " + tid if tid else "", 2), ("", 2)])
+        sheets.append(("Lynis", _sheet(lr, [11, 90, 38, 30], None, True, 2)))
+    ct = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+          '<Default Extension="xml" ContentType="application/xml"/>'
+          '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+          '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>']
+    ct += ['<Override PartName="/xl/worksheets/sheet%d.xml" ContentType="application/vnd.openxmlformats-officedocument.'
+           'spreadsheetml.worksheet+xml"/>' % n for n in range(1, len(sheets) + 1)]
+    ct.append('</Types>')
+    wb = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+          '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>']
+    wb += ['<sheet name="%s" sheetId="%d" r:id="rId%d"/>' % (nm, n, n) for n, (nm, _) in enumerate(sheets, 1)]
+    wb.append('</sheets><definedNames>')
+    for n, (nm, xml) in enumerate(sheets):
+        m = re.search(r'<autoFilter ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"', xml)
+        if m:
+            wb.append('<definedName name="_xlnm._FilterDatabase" localSheetId="%d" hidden="1">%s!$%s$%s:$%s$%s'
+                      '</definedName>' % (n, nm, m.group(1), m.group(2), m.group(3), m.group(4)))
+        wb.append('<definedName name="_xlnm.Print_Titles" localSheetId="%d">%s!$3:$3</definedName>' % (n, nm))
+    wb.append('</definedNames></workbook>')
+    rel = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+           '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">']
+    rel += ['<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/'
+            'worksheet" Target="worksheets/sheet%d.xml"/>' % (n, n) for n in range(1, len(sheets) + 1)]
+    rel.append('<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/'
+               'styles" Target="styles.xml"/></Relationships>' % (len(sheets) + 1))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", "".join(ct))
+        z.writestr("_rels/.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                   '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                   '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/'
+                   'officeDocument" Target="xl/workbook.xml"/></Relationships>')
+        z.writestr("xl/workbook.xml", "".join(wb))
+        z.writestr("xl/_rels/workbook.xml.rels", "".join(rel))
+        z.writestr("xl/styles.xml", XLSX_STYLES)
+        for n, (_, xml) in enumerate(sheets, 1):
+            z.writestr("xl/worksheets/sheet%d.xml" % n, xml)
+    return buf.getvalue()
 
 
 def export_html(c):
@@ -807,11 +956,15 @@ class Anonymizer:
         try:
             for line in open("/etc/passwd", encoding="utf-8", errors="replace"):
                 f = line.split(":")
-                if len(f) > 3 and f[2].isdigit() and 1000 <= int(f[2]) < 65534:
+                if len(f) > 5 and f[2].isdigit() and (1000 <= int(f[2]) < 65534 or f[5].startswith("/home/")):
                     users.add(f[0])
         except OSError:
             pass
-        users.update(d for d in os.listdir("/home") if os.path.isdir(os.path.join("/home", d))) if os.path.isdir("/home") else None
+        try:   # die Weboberfläche läuft mit ProtectHome=yes – /home ist dann nicht lesbar
+            users.update(d for d in os.listdir("/home") if os.path.isdir(os.path.join("/home", d)))
+        except OSError:
+            pass
+        # Virtualmin legt Benutzer mit Heimatordner unter /home an – die stehen auch in /etc/passwd
         self.users = {}                     # Platzhalter werden erst bei Verwendung vergeben
         users = sorted((u for u in users if len(u) >= 3), key=len, reverse=True)
         self.ips = {}
@@ -1421,7 +1574,9 @@ def create_app():
 
     @app.route("/empfehlungen/export.<fmt>")
     def recommendations_export(fmt):
-        if fmt not in ("md", "csv", "html", "ki", "ki-zuordnung"):
+        if fmt == "csv":   # frühere Tabelle – jetzt als Excel-Datei
+            return redirect(url_for("recommendations_export", fmt="xlsx"))
+        if fmt not in ("md", "xlsx", "html", "ki", "ki-zuordnung"):
             abort(404)
         state = current_state(all_reports(60))
         todo = [f for f in state["findings"] if f["severity"] != "INFO"]
@@ -1439,9 +1594,13 @@ def create_app():
             resp = Response(body, mimetype=mime + "; charset=utf-8")
             resp.headers["Content-Disposition"] = 'attachment; filename="%s"' % name
             return resp
-        body = {"md": export_markdown, "csv": export_csv, "html": export_html}[fmt](c)
-        mime = {"md": "text/markdown", "csv": "text/csv", "html": "text/html"}[fmt]
         name = "ubusec-empfehlungen-%s-%s.%s" % (re.sub(r"[^A-Za-z0-9.-]", "_", c["host"] or "server"), stamp, fmt)
+        if fmt == "xlsx":
+            resp = Response(export_xlsx(c), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            resp.headers["Content-Disposition"] = 'attachment; filename="%s"' % name
+            return resp
+        body = {"md": export_markdown, "html": export_html}[fmt](c)
+        mime = {"md": "text/markdown", "html": "text/html"}[fmt]
         resp = Response(body, mimetype=mime + "; charset=utf-8")
         resp.headers["Content-Disposition"] = 'attachment; filename="%s"' % name
         return resp

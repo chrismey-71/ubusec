@@ -7,7 +7,7 @@
 {% if todo or lynis %}
 <p class="export-line"><span class="muted">Alle Empfehlungen herunterladen:</span>
   <a href="{{ url_for('recommendations_export', fmt='html') }}">Zum Lesen und Drucken (HTML)</a>
-  <a href="{{ url_for('recommendations_export', fmt='csv') }}">Als Tabelle zum Abhaken (CSV)</a>
+  <a href="{{ url_for('recommendations_export', fmt='xlsx') }}">Als Excel-Tabelle zum Abhaken (.xlsx)</a>
   <a href="{{ url_for('recommendations_export', fmt='md') }}">Als Text (Markdown)</a></p>
 <details class="hint-box ai-export">
   <summary>Für eine KI aufbereiten (anonymisiert)</summary>

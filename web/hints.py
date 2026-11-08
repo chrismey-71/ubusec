@@ -137,6 +137,19 @@ _H = [
                "$ sudo sshd -t && sudo systemctl reload ssh",
                "Virtualmin: SFTP-Benutzer mit Passwort brauchen ggf. einen Match-Block als Ausnahme."], effort="15 Min",
         link="/ssh", link_label="Anleitung SSH-Schlüssel")),
+    (r"^config\|SSH: Passwort-Anmeldung für andere Benutzer", dict(
+        why="Das Wichtigste ist erledigt: root – der Name, den Angreifer immer zuerst probieren – kommt nur noch mit "
+            "Schlüssel herein. Die anderen genannten Benutzer (bei Virtualmin meist die Domain-Besitzer für SFTP) "
+            "können sich weiter mit Passwort anmelden. Das ist ein kleines Restrisiko: Ein erratenes Passwort öffnet "
+            "dann den Webordner dieser Domain, nicht den ganzen Server.",
+        steps=["Wenn das so gewollt ist: Meldung ausblenden – starke Passwörter und fail2ban genügen dann.",
+               "Benutzer, die gar kein SSH/SFTP brauchen: in Virtualmin bei diesem Benutzer eine Anmeldeart ohne "
+               "SSH-Shell wählen (z. B. nur E-Mail) – dann entfällt auch der Passwort-Zugang per SSH.",
+               "Wer SFTP nutzt, kann ebenfalls einen Schlüssel bekommen (ssh-copy-id benutzer@server) – erst wenn das "
+               "für alle klappt, PasswordAuthentication no setzen:",
+               "$ echo 'PasswordAuthentication no' | sudo tee /etc/ssh/sshd_config.d/01-ubusec-nopw.conf",
+               "$ sudo sshd -t && sudo systemctl reload ssh"], effort="5 Min (ausblenden) bis 1 Std.",
+        link="/ssh", link_label="Anleitung SSH-Schlüssel")),
     (r"^config\|SSH: Leere Passwörter", dict(
         why="Konten ohne Passwort wären per SSH ohne jede Hürde zugänglich.",
         steps=["In der SSH-Konfiguration: PermitEmptyPasswords no", "$ sudo sshd -t && sudo systemctl reload ssh"],

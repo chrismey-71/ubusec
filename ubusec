@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.0"
+UBUSEC_VERSION="1.5.1"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -447,8 +447,26 @@ mod_config() {
              "Schritt-für-Schritt-Anleitung und Schlüsselverwaltung: Weboberfläche → Einstellungen → SSH-Schlüssel (oder ubusec --ssh-help)";;
     esac
     ssh_keys_status status   # Schlüssel und letzte Anmeldungen für die Seite „SSH-Schlüssel“ auffrischen
-    [ "$(sv passwordauthentication)" = yes ] && \
-      add MITTEL config "SSH: Passwort-Anmeldung aktiv – anfällig für Brute-Force" "Empfehlung: nur Schlüssel (PasswordAuthentication no)"
+    if [ "$(sv passwordauthentication)" = yes ]; then
+      # Wer kann sich überhaupt mit Passwort anmelden? (Passwort gesetzt und eine echte Login-Shell; SFTP geht bei
+      # Virtualmin-Benutzern auch mit /bin/sh, bei /usr/sbin/nologin nicht)
+      local pwu="" pwn=0 prl; prl=$(sv permitrootlogin)
+      pwu=$(awk -F: 'NR==FNR { if ($2 != "" && $2 !~ /^[!*]/) pw[$1]=1; next }
+                     ($1 in pw) && $1 != "root" && $7 !~ /(nologin|false|sync|shutdown|halt|\/dev\/null)$/ && $7 != "" { print $1 }' \
+                 /etc/shadow /etc/passwd 2>/dev/null | sort | head -40 | paste -sd, - | sed 's/,/, /g')
+      [ -n "$pwu" ] && pwn=$(tr ',' '\n' <<<"$pwu" | grep -c .)
+      if [ "$prl" != yes ]; then
+        if [ "$pwn" -gt 0 ]; then
+          add NIEDRIG config "SSH: Passwort-Anmeldung für andere Benutzer aktiv (root nur mit Schlüssel)" \
+            "root meldet sich nur noch mit Schlüssel an (PermitRootLogin $prl) – gut." \
+            "Mit Passwort per SSH/SFTP anmelden können sich noch $pwn Benutzer: $pwu" \
+            "Bei Virtualmin oft gewollt (SFTP für Domain-Benutzer); fail2ban bremst Rateversuche."
+        fi
+      else
+        add MITTEL config "SSH: Passwort-Anmeldung aktiv – anfällig für Brute-Force" "Empfehlung: nur Schlüssel (PasswordAuthentication no)" \
+          ${pwu:+"Benutzer mit Passwort und Login-Shell (außer root): $pwu"}
+      fi
+    fi
     [ "$(sv permitemptypasswords)" = yes ] && add KRITISCH config "SSH: Leere Passwörter erlaubt (PermitEmptyPasswords yes)"
     [ "$(sv x11forwarding)" = yes ] && add NIEDRIG config "SSH: X11Forwarding aktiv (auf Servern unnötig)"
     local mat; mat=$(sv maxauthtries)
