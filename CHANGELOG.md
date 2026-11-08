@@ -2,6 +2,13 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.4 – 2026-11-08
+
+- **Fehler behoben:** Während AIDE seine Datenbank anlegt, meldete die Seite „Werkzeuge“ fälschlich „abgebrochen“.
+  Ursache: systemd ersetzt `$$` in der Befehlszeile durch `$`, dadurch stand statt der Prozessnummer nur „$“ in
+  `aide-init.running`. Die Nummer wird jetzt von ubusec selbst eingetragen. Damit greift auch der Schutz vor einem
+  zweiten gleichzeitigen Start, und Scans erkennen die laufende Einrichtung wieder.
+
 ## 1.5.3 – 2026-11-08
 
 - **Werkzeuge: sichtbare Rückmeldung.** Nach „AIDE installieren“, „Linux Malware Detect installieren“, „Werkzeuge

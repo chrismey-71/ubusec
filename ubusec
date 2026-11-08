@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.3"
+UBUSEC_VERSION="1.5.4"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -1967,13 +1967,18 @@ aide_init_bg() { # Datenbank im Hintergrund anlegen (kann auf großen Servern la
     chgrp $g $j $LOG_DIR/aide-init.log; chmod 640 $j $LOG_DIR/aide-init.log
     rm -f $STATE_DIR/aide-init.running
     UBUSEC_FORCE_CHECK=1 $INSTALL_PATH --check-tools >/dev/null 2>&1"
+  # Prozessnummer hier eintragen, nicht im Befehl selbst: systemd ersetzt „$$“ in der Befehlszeile durch „$“
+  local pid=""
   if have systemd-run; then
     systemctl reset-failed ubusec-aide-init.service 2>/dev/null
     systemd-run --unit=ubusec-aide-init --quiet -p Nice=19 -p IOSchedulingClass=idle -p CPUWeight=20 \
-      -p MemoryMax="$(scan_mem_limit_mb)M" /bin/bash -c "echo \$\$ >$STATE_DIR/aide-init.running; $cmd"
+      -p MemoryMax="$(scan_mem_limit_mb)M" /bin/bash -c "$cmd" && \
+      pid=$(systemctl show -p MainPID --value ubusec-aide-init.service 2>/dev/null)
   else
-    nohup /bin/bash -c "echo \$\$ >$STATE_DIR/aide-init.running; $cmd" >/dev/null 2>&1 &
+    nohup /bin/bash -c "$cmd" >/dev/null 2>&1 &
+    pid=$!
   fi
+  if [[ $pid =~ ^[1-9][0-9]*$ ]]; then echo "$pid" >"$STATE_DIR/aide-init.running"; chmod 644 "$STATE_DIR/aide-init.running"; fi
   sleep 1; UBUSEC_FORCE_CHECK=1 check_tools >/dev/null   # Seite „Werkzeuge“ zeigt sofort „wird eingerichtet“
 }
 MALDET_URL=https://www.rfxn.com/downloads/maldet-current.tar.gz
