@@ -310,6 +310,10 @@ FIX_TEXT = {
     "wp-fileedit": ("Datei-Editor im Backend abschalten",
                     "Fügt in {t} vor „That's all, stop editing“ die Zeile define('DISALLOW_FILE_EDIT', true); ein. "
                     "Vorher wird gesichert; PHP prüft die Datei, und ubusec testet danach die Website."),
+    "wp-archive-block": ("Archive in diesem Ordner für das Web sperren",
+                         "Ergänzt {t}/.htaccess (oder legt sie an): .zip, .tar.gz usw. sind dann über die Website nicht mehr "
+                         "abrufbar. Die Datei bleibt liegen – das Theme/Plugin braucht sie oft selbst (z. B. Impreza für "
+                         "„US Core“). Rückgängig jederzeit möglich."),
     "wp-uploads": ("PHP-Ausführung im Upload-Ordner sperren",
                    "Ergänzt {t}/.htaccess (oder legt sie an) mit einer Sperre für .php-Dateien. Bilder und andere Uploads "
                    "bleiben abrufbar."),
@@ -410,10 +414,18 @@ def fix_specs(f, report):
                     ups.append(m.group(1))
         for u in ups:
             add("wp-uploads", u)
+    last_host = ""
     for d in det:
+        mh = re.match(r"^https?://([A-Za-z0-9.-]+)/", d)
+        if mh:
+            last_host = mh.group(1)
         m = re.match(r"^(?:Datei|Ordner): (/\S+)$", d)
-        if m and re.search(r"phpinfo|\.DS_Store|Archive in Plugin|Roundcube: Installer", msg):
+        if m and re.search(r"phpinfo|\.DS_Store|Roundcube: Installer", msg):
             add("quarantine", m.group(1))
+        elif m and "Archive in Plugin" in msg and "/wp-content/" in m.group(1):
+            dd = os.path.dirname(m.group(1))
+            if not any(x["kind"] == "wp-archive-block" and x["target"] == dd for x in out):
+                add("wp-archive-block", dd, last_host)
     for x in out:
         if not (re.fullmatch(r"/(home|var/www|srv|etc/php)/[A-Za-z0-9._/@+:-]{1,300}|rpcbind|kernel|sshd|postfix|bind", x["target"])
                 or (x["kind"] == "sticky" and re.fullmatch(r"/[A-Za-z0-9._/@+:-]{1,300}", x["target"]))):

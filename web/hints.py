@@ -791,8 +791,9 @@ _H = [
     (r"^apps\|Archive in Plugin-/App-Ordnern öffentlich abrufbar", dict(
         why="Das Archiv gehört zu einem Plugin oder einer App (z. B. mitgelieferte Programme) und enthält meist keine "
             "Zugangsdaten. Abrufbar sollte es trotzdem nicht sein – es verrät Versionen und kostet Bandbreite.",
-        steps=["Prüfen, ob das Plugin/die App das Archiv wirklich braucht; bei WordPress-Plugins ist es oft ein Überbleibsel "
-               "der Installation und kann gelöscht werden.",
+        steps=["WordPress: Knopf „Archive in diesem Ordner für das Web sperren“ unten – die Datei bleibt liegen, ist aber "
+               "nicht mehr abrufbar. Nicht löschen: Themes wie Impreza installieren ihre Zusatz-Plugins aus solchen ZIP-Dateien.",
+               "Nach einem Theme-/Plugin-Update kann die Sperre fehlen – dann erscheint die Meldung wieder; einfach erneut sperren.",
                "Nextcloud-Apps (z. B. recognize/bin): nicht löschen, die App braucht es. Optional per Webserver sperren."],
         effort="5 Min")),
     (r"^rootkit\|rkhunter: [0-9]+ versteckte Dateien", dict(

@@ -2,6 +2,14 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.8 – 2026-11-09
+
+- **Fehler behoben:** Bei „Archive in Plugin-/App-Ordnern öffentlich abrufbar“ bot ubusec „Jetzt ändern“ an, lehnte
+  dann aber ab („verschiebt ubusec nicht automatisch“). Verschieben wäre auch falsch: Themes wie Impreza installieren
+  ihre Zusatz-Plugins aus diesen ZIP-Dateien. Neu ist stattdessen „Archive in diesem Ordner für das Web sperren“ – eine
+  `.htaccess` im Ordner verhindert den Abruf über die Website, die Datei bleibt liegen. Mit Prüfung der Website
+  danach und „Rückgängig machen“.
+
 ## 1.5.7 – 2026-11-09
 
 - **Klarere Knöpfe nach „Soll ich das für dich prüfen?“:** Unter dem Ergebnis steht jetzt „Was jetzt?“ mit genau einer

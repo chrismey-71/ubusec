@@ -28,6 +28,8 @@ ROOTS = ("/home/", "/var/www/", "/srv/")
 
 UPLOAD_BLOCK = ('# ubusec: keine PHP-Ausführung im Upload-Ordner\n'
                 '<FilesMatch "\\.(php|phtml|php[0-9])$">\n  Require all denied\n</FilesMatch>\n')
+ARCHIVE_BLOCK = ('# ubusec: mitgelieferte Archive nicht über das Web ausliefern (das Plugin/Theme liest sie direkt)\n'
+                 '<FilesMatch "\\.(zip|tar|tgz|gz|bz2|xz|7z|rar)$">\n  Require all denied\n</FilesMatch>\n')
 XMLRPC_BLOCK = ('# ubusec: XML-RPC sperren (Passwort-Raten); vor den Blöcken von WordPress/Wordfence\n'
                 '<Files xmlrpc.php>\n  Require all denied\n</Files>\n\n')
 FILEEDIT_LINE = "define('DISALLOW_FILE_EDIT', true); // ubusec: Datei-Editor im Backend abgeschaltet\n"
@@ -199,6 +201,26 @@ def do_wp_uploads(target, fdir, changes):
     backup(fdir, ht, changes)
     write_like(ht, (txt + ("\n" if txt and not txt.endswith("\n") else "") + UPLOAD_BLOCK), ref_dir_owner=up)
     return "%s %s" % (ht, "ergänzt" if txt else "angelegt"), ["+ " + l for l in UPLOAD_BLOCK.splitlines()]
+
+
+def do_wp_archive_block(target, fdir, changes):
+    """Archive in einem Plugin-/Theme-Ordner per .htaccess sperren – die Datei bleibt, wo sie ist (Themes wie
+    Impreza installieren ihre Zusatz-Plugins aus solchen ZIP-Dateien; Verschieben würde das brechen)."""
+    d = safe_path(target)
+    if not os.path.isdir(d) or not re.search(r"/wp-content/(plugins|themes)/[^/]+(/|$)", d + "/"):
+        raise Refuse("Kein Ordner innerhalb von wp-content/plugins oder wp-content/themes: %s" % d)
+    root = d.split("/wp-content/")[0]
+    if not os.path.isfile(os.path.join(root, "wp-settings.php")):
+        raise Refuse("Kein WordPress-Ordner: %s" % root)
+    ht = os.path.join(d, ".htaccess")
+    txt = read(ht)
+    if re.search(r"(?i)Require all denied|Deny from all", txt) and re.search(r"(?i)zip", txt):
+        return "Archive in diesem Ordner sind bereits gesperrt – nichts zu tun.", []
+    backup(fdir, ht, changes)
+    write_like(ht, (txt + ("\n" if txt and not txt.endswith("\n") else "") + ARCHIVE_BLOCK), ref_dir_owner=d)
+    return ("%s %s – Archive (.zip, .tar.gz …) sind über das Web nicht mehr abrufbar; Plugin/Theme kann sie weiter "
+            "verwenden. Nach einem Update des Themes/Plugins kann die Datei fehlen – dann meldet ubusec es erneut."
+            % (ht, "ergänzt" if txt else "angelegt")), ["+ " + l for l in ARCHIVE_BLOCK.splitlines()]
 
 
 def do_wp_xmlrpc(target, fdir, changes):
@@ -431,11 +453,12 @@ def do_sticky(target, fdir, changes):
 
 
 ACTIONS = {"wp-chmod": do_wp_chmod, "sticky": do_sticky, "wp-fileedit": do_wp_fileedit, "wp-uploads": do_wp_uploads,
+           "wp-archive-block": do_wp_archive_block,
            "wp-xmlrpc": do_wp_xmlrpc, "svc-rpcbind": do_svc_rpcbind, "sysctl": do_sysctl, "ssh-safe": do_ssh_safe,
            "ssh-root-keyonly": do_ssh_root_keyonly,
            "postfix-banner": do_postfix_banner, "bind-version": do_bind_version, "php-ini": do_php_ini,
            "quarantine": do_quarantine}
-WEB_ACTIONS = {"wp-fileedit", "wp-uploads", "wp-xmlrpc", "wp-chmod", "php-ini", "quarantine"}
+WEB_ACTIONS = {"wp-fileedit", "wp-uploads", "wp-archive-block", "wp-xmlrpc", "wp-chmod", "php-ini", "quarantine"}
 
 
 def save(out, doc):
