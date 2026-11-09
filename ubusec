@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.5"
+UBUSEC_VERSION="1.5.6"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -968,7 +968,7 @@ mod_rootkit() {
     grep -v 'INFECTED' "$RAW/chkrootkit.txt" >"$RAW/chkrootkit-rest.txt"
     if [ -f "$vpy" ] && timeout 20m python3 -I "$vpy" chkrootkit-classify "$RAW/chkrootkit-rest.txt" "$RAW/chkrootkit-class.tsv" 2>>"$RAW/chkrootkit-class.err"; then
       local kind sev msg det=() line a b
-      flush_chk() { [ -n "${sev:-}" ] && add "$sev" rootkit "$msg" "${det[@]}"; sev=""; det=(); }
+      flush_chk() { [ -n "${sev:-}" ] && add "$sev" rootkit "${msg:-chkrootkit}" "${det[@]}"; sev=""; det=(); }
       while IFS=$'\t' read -r kind a b; do
         case $kind in
           F) flush_chk; sev=$a; msg=$b ;;
@@ -1851,6 +1851,8 @@ EOF
   fi
 }
 
+inst_atomic() { install -m 0644 -o root -g root "$1" "$2.new" && mv -f "$2.new" "$2"; }
+
 do_install() {
   local with_aide=$1
   echo "→ Installiere Pakete …"
@@ -1865,13 +1867,16 @@ do_install() {
 
   apt-get install -y -qq testssl.sh 2>/dev/null || true
   echo "→ Kopiere ubusec nach $INSTALL_PATH"
-  [ "$SELF_PATH" != "$INSTALL_PATH" ] && install -m 0750 -o root -g root "$SELF_PATH" "$INSTALL_PATH"
+  # Atomar ersetzen (neue Datei + mv): Ein gerade laufender Scan liest sein Skript sonst ab der alten Stelle in der
+  # NEUEN Datei weiter und bricht mit sinnlosen Fehlern ab (Ubuntus rust-coreutils überschreibt bei install vor Ort)
+  [ "$SELF_PATH" != "$INSTALL_PATH" ] && install -m 0750 -o root -g root "$SELF_PATH" "$INSTALL_PATH.new" \
+    && mv -f "$INSTALL_PATH.new" "$INSTALL_PATH"
   ensure_dirs
   if [ -f "$SRC_DIR/checks/webcheck.py" ] && [ "$(readlink -f "$SRC_DIR/checks")" != "$CHECK_DIR" ]; then
-    install -d -m 0755 /usr/local/lib/ubusec "$CHECK_DIR"; install -m 0644 "$SRC_DIR/checks/webcheck.py" "$CHECK_DIR/webcheck.py"
-    [ -f "$SRC_DIR/checks/verify.py" ] && install -m 0644 "$SRC_DIR/checks/verify.py" "$CHECK_DIR/verify.py"
-    [ -f "$SRC_DIR/checks/fix.py" ] && install -m 0644 "$SRC_DIR/checks/fix.py" "$CHECK_DIR/fix.py"
-    [ -f "$SRC_DIR/checks/sshkeys.py" ] && install -m 0644 "$SRC_DIR/checks/sshkeys.py" "$CHECK_DIR/sshkeys.py"
+    install -d -m 0755 /usr/local/lib/ubusec "$CHECK_DIR"; inst_atomic "$SRC_DIR/checks/webcheck.py" "$CHECK_DIR/webcheck.py"
+    [ -f "$SRC_DIR/checks/verify.py" ] && inst_atomic "$SRC_DIR/checks/verify.py" "$CHECK_DIR/verify.py"
+    [ -f "$SRC_DIR/checks/fix.py" ] && inst_atomic "$SRC_DIR/checks/fix.py" "$CHECK_DIR/fix.py"
+    [ -f "$SRC_DIR/checks/sshkeys.py" ] && inst_atomic "$SRC_DIR/checks/sshkeys.py" "$CHECK_DIR/sshkeys.py"
   fi
   write_conf
   configure_rkhunter

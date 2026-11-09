@@ -2,6 +2,14 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.6 – 2026-11-09
+
+- **Fehler behoben:** Ein Scan, der während `ubusec --update` lief, konnte mit unsinnigen Meldungen wie
+  „msg: unbound variable“ abbrechen. bash liest ein Skript stückweise; wurde die Datei vor Ort überschrieben, las der
+  laufende Scan in der neuen Fassung weiter. ubusec und seine Prüfskripte werden jetzt atomar ersetzt (neue Datei,
+  dann umbenennen) – laufende Scans arbeiten mit der alten Fassung zu Ende.
+- chkrootkit-Auswertung zusätzlich gegen fehlende Meldungstexte abgesichert.
+
 ## 1.5.5 – 2026-11-09
 
 - **Fehler behoben:** „Linux Malware Detect installieren“ nutzte eine falsche Download-Adresse. Richtig ist
