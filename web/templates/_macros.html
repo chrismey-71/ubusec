@@ -69,8 +69,23 @@
         </table>
         <form method="post" action="{{ url_for('verify_start') }}" class="inline">
           <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="report" value="{{ r.id }}"><input type="hidden" name="idx" value="{{ f.idx }}">
-          <span class="muted small">Geprüft {{ res.time | ago }}.</span> <button class="btn btn-quiet">Erneut prüfen</button>
+          <span class="muted small">Geprüft {{ res.time | ago }}.</span> <button class="btn btn-quiet">Prüfung wiederholen</button>
         </form>
+        <div class="next-step next-{{ res.verdict }}">
+          <b>Was jetzt?</b>
+          {% if res.verdict == 'ok' %}
+            Die Meldung ist ein <b>Fehlalarm</b> – es gibt nichts zu beheben.
+            {% if f.module == 'baseline' %}Übernimm den neuen Stand mit „Baseline übernehmen“ (oben), dann verschwindet sie.
+            {% else %}Klick unten auf <b>„Als Fehlalarm ausblenden“</b>, dann erscheint sie in künftigen Berichten nicht mehr.{% endif %}
+          {% elif res.verdict == 'warn' %}
+            Sieh dir die gelb markierten Zeilen an. Kennst du jede davon und ist sie gewollt, kannst du die Meldung ausblenden.
+            Sonst den Hinweisen oben folgen und danach „Bereich neu scannen“.
+          {% elif res.verdict == 'bad' %}
+            <b>Nicht ausblenden.</b> Hier stimmt etwas wirklich nicht – folge den Notfall-Hinweisen und lass den Server prüfen.
+          {% else %}
+            Lies das Ergebnis oben. Steht dort „beim nächsten Scan erneut prüfen“, musst du nichts tun – der nächste Scan bewertet es neu.
+          {% endif %}
+        </div>
       {% else %}
         <h4>{{ v.title }}</h4>
         <p class="small">{{ v.text }}</p>
@@ -111,25 +126,33 @@
       {% endfor %}
     </div>
     {% endif %}
-    {% if h.alarm and f.severity in ('KRITISCH', 'HOCH') %}
+    {% set _vr = verify_result(f.verify.id)[0] if (f.verify and actions) else none %}
+    {% if h.alarm and f.severity in ('KRITISCH', 'HOCH') and not (_vr and _vr.verdict == 'ok') %}
     <div class="alarm">
       <h4>Wenn sich ein Einbruch bestätigt</h4>
       <ul>{% for s in INCIDENT %}<li>{{ s }}</li>{% endfor %}</ul>
     </div>
     {% endif %}
     {% if actions and f.severity != 'INFO' %}
+    {% set vres = verify_result(f.verify.id)[0] if f.verify else none %}
+    {% set vv = vres.verdict if vres and not verify_result(f.verify.id)[1] else '' %}
     <div class="actions">
+      {% if vv != 'ok' %}
       <form method="post" action="{{ url_for('scan_module', mod=f.module) }}">
         <input type="hidden" name="csrf" value="{{ csrf }}">
-        <button class="btn btn-quiet">Nach dem Beheben erneut prüfen</button>
+        <button class="btn btn-quiet" title="Nur diesen Bereich neu scannen – sinnvoll, nachdem du etwas geändert hast">Bereich neu scannen (nach dem Beheben)</button>
       </form>
+      {% endif %}
+      {% if vv != 'bad' and not (vv == 'ok' and f.module == 'baseline') %}
       <form method="post" action="{{ url_for('ignore') }}">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="report" value="{{ r.id }}">
         <input type="hidden" name="idx" value="{{ f.idx }}">
-        <button class="btn btn-quiet" data-confirm="Diese Meldung künftig ausblenden? Nur für geprüfte Fehlalarme verwenden – echte Probleme verschwinden sonst aus allen Berichten.">Als Fehlalarm ausblenden</button>
+        <button class="btn {{ 'btn-primary' if vv == 'ok' else 'btn-quiet' }}" data-confirm="Diese Meldung künftig ausblenden? Nur für geprüfte Fehlalarme verwenden – echte Probleme verschwinden sonst aus allen Berichten. (Rückgängig: Einstellungen → Fehlalarme)">Als Fehlalarm ausblenden</button>
       </form>
+      {% endif %}
     </div>
+    {% if not vv %}<p class="small muted actions-help">Hast du etwas geändert? → „Bereich neu scannen“. Ist die Meldung sicher harmlos? → „Als Fehlalarm ausblenden“.</p>{% endif %}
     {% endif %}
   </div>
 </details>

@@ -2,6 +2,14 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.7 – 2026-11-09
+
+- **Klarere Knöpfe nach „Soll ich das für dich prüfen?“:** Unter dem Ergebnis steht jetzt „Was jetzt?“ mit genau einer
+  Empfehlung. Ist alles in Ordnung (Fehlalarm), wird „Als Fehlalarm ausblenden“ hervorgehoben (bei Baseline-Befunden:
+  „Baseline übernehmen“), „Bereich neu scannen“ und der Notfallkasten entfallen. Bei einer echten Abweichung gibt es
+  keinen Ausblenden-Knopf. „Erneut prüfen“ heißt jetzt „Prüfung wiederholen“, „Nach dem Beheben erneut prüfen“ heißt
+  „Bereich neu scannen (nach dem Beheben)“ – mit kurzer Erklärung, wann man welchen Knopf braucht.
+
 ## 1.5.6 – 2026-11-09
 
 - **Fehler behoben:** Ein Scan brach mit „msg: unbound variable“ ab, wenn rkhunter zuvor eine Warnung gemeldet hatte.

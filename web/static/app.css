@@ -416,3 +416,10 @@ details.howto summary { cursor: pointer; }
 details.howto li { margin: .45rem 0; }
 .hint-link { margin: .8rem 0; }
 #eintragen textarea { width: 100%; font-family: ui-monospace, monospace; font-size: .9rem; }
+
+/* „Was jetzt?“ nach einer Prüfung */
+.next-step { margin: .7rem 0 .2rem; padding: .55rem .8rem; border-radius: 6px; border-left: 4px solid #8a8a8a; background: rgba(127,127,127,.08); font-size: .93rem; }
+.next-step.next-ok { border-left-color: #2e8b57; }
+.next-step.next-warn { border-left-color: #d9a400; }
+.next-step.next-bad { border-left-color: #c0392b; }
+.actions-help { margin-top: .3rem; }
