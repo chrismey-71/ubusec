@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ubusec – Sicherheitsscanner für Ubuntu-Server (Virtualmin, WordPress, Nextcloud)</title>
+<meta name="description" content="ubusec prüft jede Nacht, ob dein Ubuntu-Server aktuell, richtig eingestellt und sauber ist – Updates, CVEs, SSH, Firewall, Rootkits, Malware, Websites und WordPress – und sagt dir auf Deutsch, was zu tun ist. Open Source (MIT).">
+<link rel="canonical" href="https://chrismey-71.github.io/ubusec/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ubusec – Sicherheitsprüfung für Ubuntu-Server">
+<meta property="og:description" content="Prüft jede Nacht Updates, SSH, Firewall, Rootkits, Malware und Websites – mit verständlichen Empfehlungen auf Deutsch. Open Source.">
+<meta property="og:image" content="https://chrismey-71.github.io/ubusec/assets/img/uebersicht-light.webp">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/site.css">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"ubusec","operatingSystem":"Ubuntu 24.04, Ubuntu 26.04",
+ "applicationCategory":"SecurityApplication","license":"https://opensource.org/licenses/MIT","inLanguage":"de",
+ "url":"https://chrismey-71.github.io/ubusec/","codeRepository":"https://github.com/chrismey-71/ubusec",
+ "author":{"@type":"Person","name":"Christian Meysing"},"offers":{"@type":"Offer","price":"0","priceCurrency":"EUR"}}
+</script>
+</head>
+<body>
+<a class="skip" href="#inhalt">Zum Inhalt springen</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="./" aria-label="ubusec – Startseite">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path class="shield" d="M16 2 4 6.5v8.7c0 7.3 5 13.4 12 14.8 7-1.4 12-7.5 12-14.8V6.5L16 2z"/><path class="check" d="m10.5 16.2 3.8 3.8 7.2-7.6" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      ubusec
+    </a>
+    <nav aria-label="Seitennavigation">
+      <a href="#pruefungen">Prüfungen</a>
+      <a href="#installation">Installation</a>
+      <a href="https://github.com/chrismey-71/ubusec">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="inhalt">
+  <section class="hero wrap">
+    <p class="kicker">Open Source · für Ubuntu 24.04 und 26.04</p>
+    <h1>Sicherheitsprüfung für Ubuntu-Server</h1>
+    <p class="lede">ubusec prüft jede Nacht, ob dein Server aktuell, richtig eingestellt und sauber ist –
+      und sagt dir in verständlichem Deutsch, was zu tun ist. Gebaut für Server mit Virtualmin,
+      WordPress und Nextcloud.</p>
+    <p class="cta">
+      <a class="btn btn-primary" href="#installation">Installieren</a>
+      <a class="btn" href="https://github.com/chrismey-71/ubusec">Quellcode auf GitHub</a>
+    </p>
+    <figure class="shot shot-hero">
+      <picture>
+        <source srcset="assets/img/uebersicht-dark.webp" media="(prefers-color-scheme: dark)">
+        <img src="assets/img/uebersicht-light.webp" width="1280" height="640"
+             alt="Übersicht der Weboberfläche: drei wichtige Probleme auf server.example.de, darunter ausstehende Sicherheitsupdates und ein bald ablaufendes Zertifikat, mit Aufwand je Punkt.">
+      </picture>
+      <figcaption>Die Übersicht nach einem Scan. Alle Screenshots zeigen Beispieldaten.</figcaption>
+    </figure>
+  </section>
+
+  <section class="band">
+    <div class="wrap two">
+      <div>
+        <h2>Für wen</h2>
+        <p>Für alle, die einen oder wenige eigene Server betreiben – Vereine, Schulen, kleine Firmen,
+          Agenturen, Selbstständige – und dafür keine eigene Sicherheitsabteilung haben.
+          Du musst kein Sicherheitsprofi sein: Jeder Punkt erklärt, warum er wichtig ist,
+          wie lange das Beheben etwa dauert und welche Befehle du brauchst.</p>
+      </div>
+      <div>
+        <h2>Wie es arbeitet</h2>
+        <p>ubusec erfindet die Prüfungen nicht neu. Es bündelt bewährte Werkzeuge wie ClamAV, rkhunter,
+          chkrootkit, Lynis und OpenSCAP, ergänzt eigene Prüfungen für Websites und Webanwendungen
+          und fasst alles zu einem Bericht zusammen – geordnet nach Wichtigkeit, nicht nach Werkzeug.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="pruefungen" class="wrap section">
+    <h2>Was geprüft wird</h2>
+    <dl class="checks">
+      <div><dt>Updates</dt><dd>Ausstehende Sicherheitsupdates, nötiger Neustart, veralteter Kernel, automatische Updates, Versionen ohne Support <span class="tools">apt, needrestart</span></dd></div>
+      <div><dt>Bekannte Lücken</dt><dd>Installierte Pakete mit veröffentlichter Sicherheitslücke und verfügbarem Fix <span class="tools">OpenSCAP, Ubuntu-OVAL</span></dd></div>
+      <div><dt>Einstellungen</dt><dd>SSH, Kernel-Parameter, sudo, Konten ohne Passwort, Schutz vor Passwort-Raten <span class="tools">Lynis, eigene Prüfungen</span></dd></div>
+      <div><dt>Firewall und Ports</dt><dd>Aktive Firewall, offene und riskante Ports, IPv6 <span class="tools">ss, ufw, nft</span></dd></div>
+      <div><dt>Veränderte Dateien</dt><dd>Programmdateien, die vom Original-Paket abweichen; neue Benutzer, Dienste, Cronjobs und SSH-Schlüssel seit der letzten Prüfung <span class="tools">dpkg, optional AIDE</span></dd></div>
+      <div><dt>Rootkits und Malware</dt><dd>Rootkits, versteckte Prozesse, Cryptominer, Viren und Webshells <span class="tools">rkhunter, chkrootkit, ClamAV, optional Linux Malware Detect</span></dd></div>
+      <div><dt>Websites und Domains</dt><dd>Zertifikate und Ablaufdatum, alte TLS-Versionen, Sicherheits-Header, offen liegende <code>.git</code>-, <code>.env</code>- und Backup-Dateien, SPF und DMARC <span class="tools">alle Domains aus Virtualmin</span></dd></div>
+      <div><dt>Webanwendungen</dt><dd>WordPress (Version, Plugins, Themes, wp-config.php, Upload-Ordner), Nextcloud, Roundcube, Mautic, PHP-Versionen und -Einstellungen <span class="tools">wordpress.org, endoflife.date</span></dd></div>
+    </dl>
+    <p class="more">Die vollständige Liste steht in der <a href="https://github.com/chrismey-71/ubusec#readme">Beschreibung auf GitHub</a>.</p>
+  </section>
+
+  <section class="wrap section">
+    <h2>Was ubusec anders macht</h2>
+
+    <div class="feature">
+      <div class="feature-text">
+        <h3>„Soll ich das für dich prüfen?“</h3>
+        <p>Sicherheitswerkzeuge schlagen oft falschen Alarm. chkrootkit meldet zum Beispiel
+          gewöhnliche Programme als „INFECTED“. ubusec lädt dann auf Knopfdruck das Original-Paket
+          von Ubuntu und vergleicht Byte für Byte. Darunter steht, was jetzt zu tun ist –
+          bei einem Fehlalarm genau ein Klick.</p>
+      </div>
+      <figure class="shot">
+        <picture>
+          <source srcset="assets/img/pruefen-dark.webp" media="(prefers-color-scheme: dark)">
+          <img src="assets/img/pruefen-light.webp" width="922" height="635" loading="lazy"
+               alt="Ein chkrootkit-Befund mit Prüfergebnis: basename, dirname und env sind identisch mit dem Ubuntu-Paket. Darunter die Empfehlung, die Meldung als Fehlalarm auszublenden.">
+        </picture>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="feature-text">
+        <h3>„Soll ich das für dich ändern?“</h3>
+        <p>Viele Punkte behebt ubusec auf Wunsch selbst: wp-config.php schützen, den Datei-Editor
+          in WordPress abschalten, PHP-Ausführung im Upload-Ordner sperren, SSH härten.
+          Vorher wird gesichert, danach prüft ubusec, ob die Website noch antwortet,
+          und nimmt die Änderung sonst sofort zurück. „Rückgängig machen“ geht jederzeit.</p>
+      </div>
+      <figure class="shot">
+        <picture>
+          <source srcset="assets/img/aendern-dark.webp" media="(prefers-color-scheme: dark)">
+          <img src="assets/img/aendern-light.webp" width="922" height="552" loading="lazy"
+               alt="Ein WordPress-Befund mit dem Angebot „Soll ubusec das für dich ändern?“ und dem Knopf „Jetzt ändern“.">
+        </picture>
+      </figure>
+    </div>
+
+    <ul class="plain-list">
+      <li><b>Empfehlungen zum Mitnehmen:</b> als Excel-Tabelle zum Abhaken, zum Drucken oder als
+        anonymisierte Fassung, die du ohne Server-Namen und Pfade einer KI zeigen kannst.</li>
+      <li><b>Schnell im Alltag:</b> Der tägliche Schnellscan prüft nur Dateien, die sich seit dem
+        letzten vollständigen Virenscan geändert haben; der gründliche Vollscan läuft sonntags.</li>
+      <li><b>SSH-Schlüssel ohne Aussperren:</b> Anleitung für Windows, Mac, Linux und iPhone,
+        Schlüsselverwaltung im Browser, und die Umstellung erst, wenn eine Anmeldung mit Schlüssel geklappt hat.</li>
+    </ul>
+  </section>
+
+  <section id="installation" class="band">
+    <div class="wrap section">
+      <h2>Installation</h2>
+      <p>Auf dem Server als Benutzer mit sudo-Rechten. Die aktuelle Versionsnummer steht unter
+        <a href="https://github.com/chrismey-71/ubusec/releases">Releases</a>.</p>
+      <div class="code">
+        <button type="button" class="copy" data-target="install">Kopieren</button>
+<pre id="install"><code>VER=1.5.8
+curl -fLO https://github.com/chrismey-71/ubusec/releases/download/v$VER/ubusec-$VER.tar.gz
+curl -fLO https://github.com/chrismey-71/ubusec/releases/download/v$VER/SHA256SUMS
+sha256sum -c SHA256SUMS
+tar xzf ubusec-$VER.tar.gz &amp;&amp; cd ubusec
+sudo ./ubusec --install --with-web</code></pre>
+      </div>
+      <p>Das installiert die Prüfwerkzeuge, plant den nächtlichen Scan ein, legt den Ausgangszustand
+        des Servers fest und richtet einen Benutzer für die Weboberfläche ein. Die Weboberfläche
+        erreichst du anschließend über einen SSH-Tunnel:</p>
+      <div class="code">
+        <button type="button" class="copy" data-target="tunnel">Kopieren</button>
+<pre id="tunnel"><code>ssh -L 8765:127.0.0.1:8765 root@dein-server</code></pre>
+      </div>
+      <p>Danach im Browser <code>http://127.0.0.1:8765</code> öffnen. Später aktualisieren:
+        <code>sudo ubusec --update</code></p>
+    </div>
+  </section>
+
+  <section class="wrap section">
+    <h2>Und wie sicher ist ubusec selbst?</h2>
+    <ul class="plain-list">
+      <li>Die Weboberfläche lauscht nur auf dem Server selbst (127.0.0.1) und läuft ohne Root-Rechte.
+        Anmeldung mit Passwort, auf Wunsch mit zweitem Faktor.</li>
+      <li>Aufträge aus der Weboberfläche gehen über eine Warteschlange; nur fest eingebaute,
+        streng geprüfte Aktionen werden ausgeführt, jede wird protokolliert.</li>
+      <li>Releases und nachgeladene Werkzeuge werden mit Prüfsummen kontrolliert.
+        ubusec aktualisiert sich nie selbst ohne dein Zutun.</li>
+      <li>Der Quellcode ist offen und überschaubar: ein Bash-Skript und einige Python-Dateien.
+        Die Weboberfläche braucht nur Flask und Waitress aus den Ubuntu-Paketquellen.</li>
+    </ul>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <p>© 2026 Christian Meysing · <a href="https://github.com/chrismey-71/ubusec/blob/main/LICENSE">MIT-Lizenz</a></p>
+    <p><a href="https://github.com/chrismey-71/ubusec">GitHub</a> ·
+      <a href="https://github.com/chrismey-71/ubusec/releases">Releases</a> ·
+      <a href="https://github.com/chrismey-71/ubusec/blob/main/CHANGELOG.md">Änderungen</a> ·
+      <a href="https://github.com/chrismey-71/ubusec/issues">Fehler melden</a></p>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll(".copy").forEach(function (b) {
+  b.addEventListener("click", function () {
+    var t = document.getElementById(b.dataset.target).innerText;
+    var done = function () { b.textContent = "Kopiert"; setTimeout(function () { b.textContent = "Kopieren"; }, 1600); };
+    if (navigator.clipboard) navigator.clipboard.writeText(t).then(done, function () {});
+  });
+});
+</script>
+</body>
+</html>

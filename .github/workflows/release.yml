@@ -48,7 +48,7 @@ jobs:
         run: |
           mkdir -p dist/ubusec
           git archive HEAD | tar -x -C dist/ubusec
-          rm -rf dist/ubusec/.github dist/ubusec/.gitignore
+          rm -rf dist/ubusec/.github dist/ubusec/.gitignore dist/ubusec/docs   # Projektseite gehört nicht ins Paket
           tar czf "dist/ubusec-$VER.tar.gz" --owner=0 --group=0 -C dist ubusec
           (cd dist && sha256sum "ubusec-$VER.tar.gz" > SHA256SUMS)
           awk -v v="$VER" 'index($0, "## " v) == 1 {f = 1; next} /^## / && f {exit} f' CHANGELOG.md > notes.md

@@ -2,9 +2,17 @@
 
 [Releases](https://github.com/chrismey-71/ubusec/releases) · [Änderungen](CHANGELOG.md) · Lizenz: MIT
 
-ubusec bündelt bewährte Open-Source-Werkzeuge und fasst ihre Ergebnisse zu **einem knappen
-Bericht** mit Schweregraden zusammen – auf der Kommandozeile, als Text/HTML/JSON und in einer
-**Weboberfläche** mit Login, Scan-Start, Berichten und Verbesserungshinweisen.
+**ubusec ist ein Sicherheitsscanner für Ubuntu-Server** (24.04 und 26.04), gebaut für Server mit
+Virtualmin, WordPress und Nextcloud. Er prüft jede Nacht Updates und bekannte Sicherheitslücken (CVE),
+SSH, Firewall und Ports, veränderte Systemdateien, Rootkits, Malware sowie alle Websites und
+Webanwendungen – und fasst die Ergebnisse zu **verständlichen Empfehlungen auf Deutsch** zusammen:
+warum ein Punkt wichtig ist, wie lange das Beheben dauert und welche Befehle du brauchst.
+Viele Punkte prüft oder behebt ubusec auf Knopfdruck in seiner **Weboberfläche**.
+
+Projektseite mit Screenshots: **https://chrismey-71.github.io/ubusec/**
+
+Unter der Haube bündelt ubusec bewährte Open-Source-Werkzeuge (ClamAV, rkhunter, chkrootkit, Lynis,
+OpenSCAP u. a.) mit eigenen Prüfungen – auf der Kommandozeile, als Text/HTML/JSON und in der Weboberfläche.
 
 | Bereich | Was geprüft wird | Werkzeuge |
 |---|---|---|
