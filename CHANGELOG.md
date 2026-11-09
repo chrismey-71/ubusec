@@ -2,6 +2,12 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.5 – 2026-11-09
+
+- **Fehler behoben:** „Linux Malware Detect installieren“ nutzte eine falsche Download-Adresse. Richtig ist
+  `https://www.rfxn.com/downloads/maldetect-current.tar.gz` (laut rfxn.com). Zusätzlich wird die von rfxn.com
+  veröffentlichte MD5-Prüfsumme abgeglichen; stimmt sie nicht, wird nicht installiert.
+
 ## 1.5.4 – 2026-11-08
 
 - **Fehler behoben:** Während AIDE seine Datenbank anlegt, meldete die Seite „Werkzeuge“ fälschlich „abgebrochen“.

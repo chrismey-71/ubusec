@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.4"
+UBUSEC_VERSION="1.5.5"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -1981,7 +1981,7 @@ aide_init_bg() { # Datenbank im Hintergrund anlegen (kann auf großen Servern la
   if [[ $pid =~ ^[1-9][0-9]*$ ]]; then echo "$pid" >"$STATE_DIR/aide-init.running"; chmod 644 "$STATE_DIR/aide-init.running"; fi
   sleep 1; UBUSEC_FORCE_CHECK=1 check_tools >/dev/null   # Seite „Werkzeuge“ zeigt sofort „wird eingerichtet“
 }
-MALDET_URL=https://www.rfxn.com/downloads/maldet-current.tar.gz
+MALDET_URL=https://www.rfxn.com/downloads/maldetect-current.tar.gz   # laut rfxn.com/projects/linux-malware-detect
 install_optional() { # install_optional aide|maldet
   local tool=$1 log=$STATE_DIR/tools-update.log rc=0 ok=0
   ensure_dirs; tools_state true "install-$tool"
@@ -2001,7 +2001,13 @@ install_optional() { # install_optional aide|maldet
         fi ;;
       maldet)
         local tmp; tmp=$(mktemp -d "$STATE_DIR/work/maldet.XXXXXX")
-        if curl -fsSL --max-time 120 -o "$tmp/maldet.tgz" "$MALDET_URL" && tar -xzf "$tmp/maldet.tgz" -C "$tmp" \
+        local want="" have_md5=""
+        want=$(curl -fsSL --max-time 30 "$MALDET_URL.md5" 2>/dev/null | grep -oiE '\b[0-9a-f]{32}\b' | head -1)
+        if curl -fsSL --max-time 120 -o "$tmp/maldet.tgz" "$MALDET_URL" && have_md5=$(md5sum "$tmp/maldet.tgz" | cut -d' ' -f1) \
+           && { [ -z "$want" ] && echo "Hinweis: Prüfsumme von rfxn.com nicht abrufbar – Download nur über HTTPS geprüft" \
+                || { [ "${want,,}" = "$have_md5" ] && echo "Prüfsumme (MD5 laut rfxn.com) stimmt"; } \
+                || { echo "Prüfsumme stimmt NICHT ($have_md5 statt $want) – Installation abgebrochen"; false; }; } \
+           && tar -xzf "$tmp/maldet.tgz" -C "$tmp" \
            && d=$(dirname "$(find "$tmp" -maxdepth 2 -name install.sh | head -1)") && [ -f "$d/install.sh" ]; then
           echo "Heruntergeladen: $MALDET_URL ($(sha256sum "$tmp/maldet.tgz" | cut -c1-16)…)"
           (cd "$d" && ./install.sh) | tail -5
