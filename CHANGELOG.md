@@ -9,6 +9,10 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   ihre Zusatz-Plugins aus diesen ZIP-Dateien. Neu ist stattdessen „Archive in diesem Ordner für das Web sperren“ – eine
   `.htaccess` im Ordner verhindert den Abruf über die Website, die Datei bleibt liegen. Mit Prüfung der Website
   danach und „Rückgängig machen“.
+- **PHP-Einstellungen nur für installierte Versionen prüfen:** `php.ini`-Dateien entfernter PHP-Versionen (z. B.
+  Virtualmins `etc/php7.4` je Domain oder `/etc/php/7.4` nach `apt remove`) lösen keine Meldungen wie „Session-Cookies
+  ohne HttpOnly“ mehr aus und werden nicht mehr zum Ändern angeboten. Stattdessen nennt ubusec sie als
+  „Überbleibsel“ mit den installierten Versionen und einer Anleitung zum Aufräumen.
 
 ## 1.5.7 – 2026-11-09
 

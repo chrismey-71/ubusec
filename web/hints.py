@@ -788,6 +788,18 @@ _H = [
         why="Eine neue ubusec-Version ist auf GitHub erschienen – mit neuen Prüfungen oder Korrekturen.",
         steps=["Änderungen ansehen: Weboberfläche → Werkzeuge", "$ sudo ubusec --update"], effort="5 Min")),
 
+    (r"^apps\|PHP: Einstellungen für nicht mehr installierte PHP-Versionen", dict(
+        why="Diese Ordner gehören zu PHP-Versionen, die auf dem Server nicht mehr installiert sind. Virtualmin lässt "
+            "beim Wechsel der PHP-Version die alten Einstellungen je Domain liegen (etc/php7.4 …), apt lässt nach dem "
+            "Entfernen /etc/php/7.4 liegen. Sie werden nicht benutzt – ein Risiko sind sie nicht, sie verwirren nur. "
+            "ubusec prüft die Einstellungen darin deshalb nicht mehr.",
+        steps=["Zuerst in Virtualmin bei jeder betroffenen Domain nachsehen, dass sie eine installierte PHP-Version "
+               "verwendet (PHP-Einstellungen der Domain) – die installierten Versionen stehen in der ersten Zeile oben.",
+               "Danach die genannten Ordner unter /home löschen, z. B.:",
+               "$ sudo rm -r /home/BENUTZER/domains/DOMAIN/etc/php7.4",
+               "Reste unter /etc/php/X.Y entfernt apt vollständig:",
+               "$ sudo apt purge 'php7.4-*'",
+               "Danach „Bereich neu scannen“."], effort="10 Min")),
     (r"^apps\|Archive in Plugin-/App-Ordnern öffentlich abrufbar", dict(
         why="Das Archiv gehört zu einem Plugin oder einer App (z. B. mitgelieferte Programme) und enthält meist keine "
             "Zugangsdaten. Abrufbar sollte es trotzdem nicht sein – es verrät Versionen und kostet Bandbreite.",

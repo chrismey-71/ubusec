@@ -1069,7 +1069,22 @@ def check_php():
                     "PHP %s (Support endete %s%s)" % (v, e["eol"], ", FPM-Dienst läuft" if active else ""))
     inis = glob.glob("/etc/php/*/fpm/php.ini") + glob.glob("/etc/php/*/cgi/php.ini") + glob.glob("/etc/php/*/apache2/php.ini") \
         + glob.glob("/home/*/etc/php*/php.ini") + glob.glob("/home/*/domains/*/etc/php*/php.ini")
+    # Welche PHP-Versionen sind wirklich installiert? (CLI, CGI oder FPM)
+    have = set(versions)
+    for pat in ("/usr/bin/php-cgi[0-9]*", "/usr/sbin/php-fpm[0-9]*", "/usr/lib/cgi-bin/php[0-9]*"):
+        for b in glob.glob(pat):
+            m = re.search(r"(\d+\.\d+)$", b)
+            if m:
+                have.add(m.group(1))
+    stale = []
     for ini in inis:
+        m = re.search(r"/etc/php/(\d+\.\d+)/|/etc/php(\d+\.\d+)/php\.ini$", ini)
+        v = m and (m.group(1) or m.group(2))
+        if v and have and v not in have:
+            # Überbleibsel einer entfernten PHP-Version (Virtualmin lässt etc/phpX.Y je Domain stehen,
+            # apt remove lässt /etc/php/X.Y stehen) – wird nicht benutzt, Einstellungen darin sind egal
+            stale.append((v, os.path.dirname(ini) if "/etc/php/" not in ini else "/etc/php/" + v))
+            continue
         vals = {}
         for line in read(ini).splitlines():
             m = re.match(r"^\s*([A-Za-z_.]+)\s*=\s*([^;]*)", line)
@@ -1084,6 +1099,12 @@ def check_php():
             agg("NIEDRIG", "PHP: expose_php aktiv (Version im Header)", ini)
         if "session.cookie_httponly" in vals and not on("session.cookie_httponly"):
             agg("NIEDRIG", "PHP: Session-Cookies ohne HttpOnly", ini)
+    if stale:
+        agg("NIEDRIG", "PHP: Einstellungen für nicht mehr installierte PHP-Versionen (Überbleibsel)",
+            "Installiert: PHP " + ", ".join(sorted(have, key=vt)))
+        for v, d in sorted(set(stale), key=lambda x: x[1]):
+            agg("NIEDRIG", "PHP: Einstellungen für nicht mehr installierte PHP-Versionen (Überbleibsel)",
+                "Ordner: %s (PHP %s)" % (d, v))
     return found
 
 
