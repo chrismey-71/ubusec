@@ -270,15 +270,19 @@ class _SNIConn(http.client.HTTPSConnection):
         self.sock = self._context.wrap_socket(sock, server_hostname=self._sni)
 
 
-def fetch(domain, ip, path="/", scheme="https", method="GET", body=None, limit=65536, ctype=None):
+FETCH_ERR = [""]   # Grund des letzten Fehlschlags von fetch() (für verständliche Meldungen)
+
+
+def fetch(domain, ip, path="/", scheme="https", method="GET", body=None, limit=65536, ctype=None, timeout=None):
+    FETCH_ERR[0] = ""
     try:
         if scheme == "https":
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-            c = _SNIConn(domain, ip, 443, timeout=TIMEOUT, context=ctx)
+            c = _SNIConn(domain, ip, 443, timeout=timeout or TIMEOUT, context=ctx)
         else:
-            c = http.client.HTTPConnection(ip, 80, timeout=TIMEOUT)
+            c = http.client.HTTPConnection(ip, 80, timeout=timeout or TIMEOUT)
         hdr = {"Host": domain, "User-Agent": UA, "Accept": "*/*"}
         if ctype:
             hdr["Content-Type"] = ctype
@@ -291,7 +295,11 @@ def fetch(domain, ip, path="/", scheme="https", method="GET", body=None, limit=6
         data = r.read(limit) if method != "HEAD" else b""
         c.close()
         return Resp(r.status, headers, data)
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        FETCH_ERR[0] = "Zeitüberschreitung" if isinstance(e, (socket.timeout, TimeoutError)) else \
+            "Verbindung abgelehnt" if isinstance(e, ConnectionRefusedError) else \
+            "Verbindung abgebrochen" if isinstance(e, (ConnectionResetError, http.client.RemoteDisconnected)) else \
+            type(e).__name__
         return None
 
 
@@ -394,7 +402,7 @@ def check_domain(domain, vh, full):
 
     # --- Startseite und Header (einer Weiterleitung auf dieselbe Domain folgen) ---
     r = fetch(domain, ip, "/")
-    path = "/"
+    path, host_used = "/", domain
     for _ in range(3):
         if r is None or r.status not in (301, 302, 307, 308):
             break
@@ -402,11 +410,20 @@ def check_domain(domain, vh, full):
         m = re.match(r"https://([^/]+)(/.*)?$", loc)
         if not m or m.group(1).lower().split(":")[0] not in (domain, "www." + domain, domain.replace("www.", "", 1)):
             break
-        path = m.group(2) or "/"
-        r = fetch(m.group(1).lower(), ip, path)
+        path, host_used = m.group(2) or "/", m.group(1).lower()
+        r = fetch(host_used, ip, path)
     if r is None:
-        agg("HOCH", "HTTPS nicht erreichbar ({domains})", domain)
-        return res
+        # TLS klappt (siehe oben), nur die Seite antwortet nicht rechtzeitig – oft eine langsame Startseite
+        # (großes WordPress, Cache leer). Einmal mit viel Zeit wiederholen, bevor etwas gemeldet wird.
+        t0 = time.time()
+        r = fetch(host_used, ip, path, timeout=45)
+        took = time.time() - t0
+        if r is None:
+            agg("MITTEL", "Startseite antwortet über HTTPS nicht ({domains})",
+                "%s – %s%s (verschlüsselte Verbindung selbst klappt)" % (
+                    domain, FETCH_ERR[0] or "keine Antwort", " nach %d s" % took if FETCH_ERR[0] == "Zeitüberschreitung" else ""))
+            return res
+        agg("NIEDRIG", "Startseite antwortet sehr langsam ({domains})", "%s – %.0f s bis zur Antwort" % (domain, took))
     res["status"] = r.status
     if r.status < 500:
         hsts = r.h("strict-transport-security")

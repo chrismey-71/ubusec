@@ -13,6 +13,11 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   Virtualmins `etc/php7.4` je Domain oder `/etc/php/7.4` nach `apt remove`) lösen keine Meldungen wie „Session-Cookies
   ohne HttpOnly“ mehr aus und werden nicht mehr zum Ändern angeboten. Stattdessen nennt ubusec sie als
   „Überbleibsel“ mit den installierten Versionen und einer Anleitung zum Aufräumen.
+- **„HTTPS nicht erreichbar“ nur noch, wenn es stimmt:** Klappt die verschlüsselte Verbindung, aber die Startseite
+  antwortet nicht innerhalb von 8 Sekunden, fragt ubusec ein zweites Mal mit 45 Sekunden nach. Antwortet sie dann,
+  heißt es „Startseite antwortet sehr langsam“ (NIEDRIG, mit Sekunden); sonst „Startseite antwortet über HTTPS
+  nicht“ (MITTEL) mit dem Grund (z. B. Zeitüberschreitung) und Hinweisen zu Cache und zu Wordfence/fail2ban, die die
+  Prüfanfragen des Servers sperren können.
 
 ## 1.5.7 – 2026-11-09
 

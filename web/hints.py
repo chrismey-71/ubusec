@@ -494,6 +494,23 @@ _H = [
         why="Das Zertifikat passt nicht zum Domainnamen oder stammt nicht von einer anerkannten Stelle. Besucher bekommen eine Warnung.",
         steps=["Virtualmin: Domain → Server Configuration → SSL Certificate → Let's Encrypt für alle Namen (mit und ohne www) anfordern."],
         effort="15 Min")),
+    (r"^sites\|Startseite antwortet über HTTPS nicht", dict(
+        why="Die verschlüsselte Verbindung klappt (Zertifikat in Ordnung), aber die Startseite hat auch nach 45 Sekunden "
+            "nicht geantwortet. Meist ist die Seite selbst zu langsam (großes WordPress, leerer Cache, ausgelastetes "
+            "PHP-FPM) – oder ein Sicherheits-Plugin bzw. fail2ban sperrt die Anfragen, die ubusec vom Server selbst aus stellt.",
+        steps=["Auf dem Server messen, wie lange die Seite braucht (Domain einsetzen):",
+               "$ curl -o /dev/null -s -w '%{http_code} in %{time_total} s\\n' https://DOMAIN/",
+               "Kommt schnell „200“ oder „301“: Wahrscheinlich sperrt Wordfence/fail2ban die IP des Servers nach den "
+               "Prüfanfragen von ubusec – die eigene Server-IP in Wordfence (Firewall → Allowlisted IPs) bzw. in fail2ban "
+               "(ignoreip) eintragen.",
+               "Dauert es lange: Seiten-Cache aktivieren (z. B. WP Super Cache) und PHP-FPM-Auslastung prüfen."],
+        effort="15 Min")),
+    (r"^sites\|Startseite antwortet sehr langsam", dict(
+        why="Die Startseite antwortet, braucht aber deutlich länger als 8 Sekunden. Besucher springen ab, und "
+            "Angreifer können so eine Seite mit wenigen Anfragen lahmlegen.",
+        steps=["Seiten-Cache aktivieren (WordPress z. B. WP Super Cache oder der Cache des Themes).",
+               "Auf dem Server messen (Domain einsetzen):",
+               "$ curl -o /dev/null -s -w '%{time_total} s\\n' https://DOMAIN/"], effort="30 Min")),
     (r"^sites\|HTTPS nicht erreichbar", dict(
         why="Die Seite ist nicht verschlüsselt erreichbar – Anmeldedaten und Formulare gehen im Klartext durchs Netz.",
         steps=["Virtualmin: Domain → Edit Virtual Server → Enabled features → SSL website aktivieren",
