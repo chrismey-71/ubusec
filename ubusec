@@ -967,8 +967,10 @@ mod_rootkit() {
     local vpy=$CHECK_DIR/verify.py; [ -f "$vpy" ] || vpy=$SRC_DIR/checks/verify.py
     grep -v 'INFECTED' "$RAW/chkrootkit.txt" >"$RAW/chkrootkit-rest.txt"
     if [ -f "$vpy" ] && timeout 20m python3 -I "$vpy" chkrootkit-classify "$RAW/chkrootkit-rest.txt" "$RAW/chkrootkit-class.tsv" 2>>"$RAW/chkrootkit-class.err"; then
-      local kind sev msg det=() line a b
-      flush_chk() { [ -n "${sev:-}" ] && add "$sev" rootkit "${msg:-chkrootkit}" "${det[@]}"; sev=""; det=(); }
+      # sev/msg ausdrücklich leeren: „local sev“ ein zweites Mal in derselben Funktion behält den Wert aus dem
+      # rkhunter-Teil oben – dann würde ein Befund mit falscher Schwere ohne Text gemeldet (bzw. bricht ab)
+      local kind sev="" msg="" det=() line a b
+      flush_chk() { [ -n "${sev:-}" ] && add "$sev" rootkit "${msg:-chkrootkit}" "${det[@]}"; sev=""; msg=""; det=(); }
       while IFS=$'\t' read -r kind a b; do
         case $kind in
           F) flush_chk; sev=$a; msg=$b ;;

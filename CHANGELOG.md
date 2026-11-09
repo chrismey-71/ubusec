@@ -4,11 +4,11 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.5.6 – 2026-11-09
 
-- **Fehler behoben:** Ein Scan, der während `ubusec --update` lief, konnte mit unsinnigen Meldungen wie
-  „msg: unbound variable“ abbrechen. bash liest ein Skript stückweise; wurde die Datei vor Ort überschrieben, las der
-  laufende Scan in der neuen Fassung weiter. ubusec und seine Prüfskripte werden jetzt atomar ersetzt (neue Datei,
-  dann umbenennen) – laufende Scans arbeiten mit der alten Fassung zu Ende.
-- chkrootkit-Auswertung zusätzlich gegen fehlende Meldungstexte abgesichert.
+- **Fehler behoben:** Ein Scan brach mit „msg: unbound variable“ ab, wenn rkhunter zuvor eine Warnung gemeldet hatte.
+  Die chkrootkit-Auswertung übernahm dann die Schwere aus dem rkhunter-Teil (bash behält beim zweiten `local` in
+  derselben Funktion den alten Wert). Die Variablen werden jetzt ausdrücklich geleert.
+- **Updates sicherer:** ubusec und seine Prüfskripte werden jetzt atomar ersetzt (neue Datei, dann umbenennen). Ein
+  Scan, der während `ubusec --update` läuft, arbeitet so in jedem Fall mit der alten Fassung zu Ende.
 
 ## 1.5.5 – 2026-11-09
 
