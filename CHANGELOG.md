@@ -9,6 +9,7 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   „Baseline übernehmen“), „Bereich neu scannen“ und der Notfallkasten entfallen. Bei einer echten Abweichung gibt es
   keinen Ausblenden-Knopf. „Erneut prüfen“ heißt jetzt „Prüfung wiederholen“, „Nach dem Beheben erneut prüfen“ heißt
   „Bereich neu scannen (nach dem Beheben)“ – mit kurzer Erklärung, wann man welchen Knopf braucht.
+- Copyright-Vermerk mit Link zur Lizenz unten in der Navigationsleiste.
 
 ## 1.5.6 – 2026-11-09
 

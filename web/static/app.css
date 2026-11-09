@@ -423,3 +423,6 @@ details.howto li { margin: .45rem 0; }
 .next-step.next-warn { border-left-color: #d9a400; }
 .next-step.next-bad { border-left-color: #c0392b; }
 .actions-help { margin-top: .3rem; }
+
+.copyright { font-size: .72rem; color: var(--muted); opacity: .75; line-height: 1.35; }
+.copyright a { color: inherit; white-space: nowrap; }
