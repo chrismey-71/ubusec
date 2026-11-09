@@ -8,6 +8,11 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   Sicherheitsupdates): ubusec wartet bis zu 5 Minuten auf die Paketverwaltung statt mit „Could not get lock
   /var/lib/dpkg/lock-frontend“ abzubrechen. Bereits installierte Pakete der Weboberfläche werden nicht erneut
   angefordert.
+- **WPScan schont das Tageskontingent** (kostenlos 25 Abfragen am Tag): Jedes Plugin wird höchstens einmal am Tag
+  abgefragt, über alle Scans eines Tages hinweg höchstens 22-mal (Reserve für eigene Abfragen). Weitere Scans am
+  selben Tag nutzen das gespeicherte Ergebnis (bis 14 Tage alt). Bei vielen Plugins kommen nie geprüfte zuerst und
+  dann die ältesten an die Reihe. Meldet WPScan das Limit oder lehnt das Token ab, fragt ubusec an diesem Tag nicht
+  mehr. Die Einstellungen zeigen „Heute genutzt: x von 22“; neuer Knopf „WordPress-Plugins jetzt bei WPScan prüfen“.
 
 ## 1.5.8 – 2026-11-09
 

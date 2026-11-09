@@ -245,10 +245,19 @@
       <span>Gründliche TLS-Prüfung mit testssl.sh beim Vollscan<br><small class="muted">Findet auch schwache Verschlüsselungsverfahren, dauert aber pro Domain ein bis zwei Minuten.</small></span></label>
     <label>WPScan-API-Token (optional)
       <input name="WPSCAN_API_TOKEN" type="password" autocomplete="off" placeholder="{{ 'gespeichert – zum Ändern neu eingeben' if conf.WPSCAN_API_TOKEN else 'kostenlos auf wpscan.com erhältlich' }}">
-      <small class="muted">Damit prüft ubusec WordPress-Plugins gegen eine Datenbank bekannter Sicherheitslücken (kostenlos: 25 Abfragen pro Tag).</small></label>
+      <small class="muted">Damit prüft ubusec WordPress-Plugins gegen eine Datenbank bekannter Sicherheitslücken (kostenlos: 25 Abfragen pro Tag).
+        Jedes Plugin wird höchstens einmal am Tag abgefragt – meist beim nächtlichen Scan –, weitere Scans am selben Tag nutzen das gespeicherte
+        Ergebnis. ubusec stellt höchstens 22 Abfragen am Tag und lässt dir so etwas Reserve.
+        {% if conf.WPSCAN_API_TOKEN %}<br>Heute genutzt: <b>{{ wpb.used or 0 }} von 22</b>{% if wpb.blocked == 'limit' %} – WPScan meldet das Tageslimit als erreicht{% elif wpb.blocked == 'token' %} – <b>Token wird abgelehnt</b>{% endif %}.{% endif %}</small></label>
     {% if conf.WPSCAN_API_TOKEN %}<label class="check"><input type="checkbox" name="token_remove"> <span>Gespeichertes Token entfernen</span></label>{% endif %}
     <button class="btn">Scan-Einstellungen speichern</button>
   </form>
+  {% if conf.WPSCAN_API_TOKEN %}
+  <form method="post" action="{{ url_for('wpscan_now') }}" class="inline" style="margin-top:.8rem">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn btn-quiet" title="Fragt Plugins neu ab, deren Ergebnis älter als eine Stunde ist – im Rahmen des Tageskontingents">WordPress-Plugins jetzt bei WPScan prüfen</button>
+  </form>
+  {% endif %}
 </section>
 
 {# ----------------------------------------------------------- Fehlalarme #}

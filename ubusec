@@ -1542,7 +1542,7 @@ run_webcheck() {
   fi
   local cvef=0; [[ " ${RUN_MODULES:-} " == *" cve "* ]] && cvef=1
   UBUSEC_CVE_FOLLOWS=$cvef SITES_EXCLUDE="$SITES_EXCLUDE" SITES_EXTRA="$SITES_EXTRA" SITES_TESTSSL="$SITES_TESTSSL" \
-  WPSCAN_API_TOKEN="$WPSCAN_API_TOKEN" WEB_PATHS="$WEB_PATHS" RAW="$RAW" STATE_DIR="$STATE_DIR" \
+  WPSCAN_API_TOKEN="$WPSCAN_API_TOKEN" UBUSEC_WPSCAN_FORCE="${UBUSEC_WPSCAN_FORCE:-0}" WEB_PATHS="$WEB_PATHS" RAW="$RAW" STATE_DIR="$STATE_DIR" \
   UBUSEC_VERSION="$UBUSEC_VERSION" UBUSEC_REPO="$UBUSEC_REPO" UPDATE_CHECK="$UPDATE_CHECK" TOOLS_JSON="$STATE_DIR/tools.json" \
     timeout 4h python3 -I "$dir/webcheck.py" "$1" --raw "$RAW" --mode "$MODE" >"$RAW/$1.tsv" 2>"$RAW/$1.err"
   local sev msg det arr
@@ -2345,7 +2345,8 @@ process_queue() { # process_queue req|ctl
     action=${REQ[action]:-}; user=${REQ[user]}
     if [ "$kind" = req ]; then
       [ "$action" = scan ] || { audit "ABGELEHNT $user: Aktion '$action' in der Scan-Warteschlange"; continue; }
-      local mode=${REQ[mode]:-} only=${REQ[only]:-}
+      local mode=${REQ[mode]:-} only=${REQ[only]:-} wpf=${REQ[wpscan]:-0}
+      [[ $wpf =~ ^[01]$ ]] || wpf=0
       [[ $mode =~ ^(quick|full)$ ]] || { audit "ABGELEHNT $user: Modus '$mode'"; continue; }
       if [ -n "$only" ]; then
         [[ $only =~ ^[a-z,]{1,120}$ ]] || { audit "ABGELEHNT $user: Module '$only'"; continue; }
@@ -2354,7 +2355,7 @@ process_queue() { # process_queue req|ctl
       audit "SCAN $user mode=$mode only=${only:-alle}"
       # sofort „läuft“ melden, damit die Oberfläche keine Lücke bis zum Scan-Start sieht
       MODE=$mode MODE_LABEL="Scan wird gestartet" TRIGGER=web T0=$(date +%s) write_status true "" 0 1
-      "$SELF_PATH" "--$mode" ${only:+--only "$only"} --trigger web --quiet
+      UBUSEC_WPSCAN_FORCE=$wpf "$SELF_PATH" "--$mode" ${only:+--only "$only"} --trigger web --quiet
       continue
     fi
     case $action in

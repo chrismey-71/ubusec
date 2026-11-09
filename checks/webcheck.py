@@ -777,18 +777,105 @@ def wp_latest(kind, slug):
     return d.get("version") if isinstance(d, dict) and d.get("version") else "unbekannt"
 
 
-WPSCAN_USED = [0]
+WPSCAN_DAILY = 22          # kostenloser Plan: 25 Abfragen am Tag – etwas Reserve für eigene Abfragen lassen
+WPSCAN_SKIPPED = set()
+WPSCAN_BUDGET = os.path.join(os.environ.get("STATE_DIR", "/var/lib/ubusec"), "wpscan-budget.json")
+
+
+def _wpscan_budget():
+    day = time.strftime("%Y-%m-%d")
+    try:
+        b = json.load(open(WPSCAN_BUDGET))
+        if b.get("day") == day:
+            return b
+    except (OSError, ValueError):
+        pass
+    return {"day": day, "used": 0, "blocked": "", "limit": WPSCAN_DAILY}
+
+
+def _wpscan_save(b):
+    try:
+        tmp = WPSCAN_BUDGET + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(b, f)
+        try:     # die Weboberfläche zeigt den Tagesverbrauch an
+            import grp
+            os.chown(tmp, -1, grp.getgrnam("ubusec").gr_gid)
+            os.chmod(tmp, 0o640)
+        except (KeyError, OSError):
+            pass
+        os.replace(tmp, WPSCAN_BUDGET)
+    except OSError:
+        pass
+
+
+def _wpscan_cache(slug):
+    return os.path.join(CACHE, "wpscan-%s.json" % re.sub(r"[^a-z0-9_-]", "_", slug))
+
+
+def _wpscan_age(slug):
+    try:
+        return time.time() - os.path.getmtime(_wpscan_cache(slug))
+    except OSError:
+        return None
+
+
+def wpscan_prefetch(slugs):
+    """Vor der WordPress-Prüfung: Plugins bei WPScan abfragen – nie geprüfte zuerst, dann die ältesten.
+    Jedes Plugin höchstens einmal am Tag, über alle Scans eines Tages höchstens WPSCAN_DAILY Abfragen.
+    So kommen bei vielen Plugins alle reihum dran, auch wenn das Kontingent nicht für alle an einem Tag reicht."""
+    tok = os.environ.get("WPSCAN_API_TOKEN", "")
+    if not tok or not slugs:
+        return
+    os.makedirs(CACHE, mode=0o700, exist_ok=True)
+    force = os.environ.get("UBUSEC_WPSCAN_FORCE") == "1"
+    due = []
+    for slug in sorted(set(slugs)):
+        age = _wpscan_age(slug)
+        if age is None or age >= 86400 or (force and age >= 3600):
+            due.append((0 if age is None else 1, -(age or 0), slug))
+    b = _wpscan_budget()
+    for _, _, slug in sorted(due):
+        if b.get("blocked") or b.get("used", 0) >= WPSCAN_DAILY:
+            break
+        b["used"] = b.get("used", 0) + 1
+        cp = _wpscan_cache(slug)
+        try:
+            req = urllib.request.Request("https://wpscan.com/api/v3/plugins/%s" % slug, headers={
+                "User-Agent": UA, "Accept": "application/json", "Authorization": "Token token=%s" % tok})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                d = json.loads(r.read().decode("utf-8", "replace"))
+            with open(cp, "w", encoding="utf-8") as f:
+                json.dump(d, f)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                with open(cp, "w", encoding="utf-8") as f:
+                    json.dump({}, f)
+            elif e.code == 429:
+                b["blocked"] = "limit"       # Kontingent bei WPScan erschöpft – heute nicht mehr fragen
+            elif e.code in (401, 403):
+                b["blocked"] = "token"
+            else:
+                NET_FAIL.add("wpscan.com")
+        except Exception:  # noqa: BLE001
+            NET_FAIL.add("wpscan.com")
+    _wpscan_save(b)
 
 
 def wpscan_vulns(slug, version):
-    tok = os.environ.get("WPSCAN_API_TOKEN", "")
-    if not tok or WPSCAN_USED[0] >= 20:
+    """Bekannte Lücken eines Plugins aus dem gespeicherten WPScan-Ergebnis (höchstens 14 Tage alt)."""
+    if not os.environ.get("WPSCAN_API_TOKEN", ""):
         return []
-    cp = os.path.join(CACHE, "wpscan-%s.json" % re.sub(r"[^a-z0-9_-]", "_", slug))
-    if not (os.path.exists(cp) and time.time() - os.path.getmtime(cp) < 86400):
-        WPSCAN_USED[0] += 1
-    d = get_json("https://wpscan.com/api/v3/plugins/%s" % slug, "wpscan-" + slug,
-                 headers={"Authorization": "Token token=%s" % tok})
+    age = _wpscan_age(slug)
+    d = None
+    if age is not None and age < 14 * 86400:
+        try:
+            d = json.load(open(_wpscan_cache(slug), encoding="utf-8"))
+        except (OSError, ValueError):
+            d = None
+    if d is None:
+        WPSCAN_SKIPPED.add(slug)
+        return []
     if not isinstance(d, dict) or slug not in d:
         return []
     out = []
@@ -1171,6 +1258,7 @@ def mod_apps(raw, full):
     roots = web_roots(vh)
     apps = find_apps(roots)
     result = {k: [] for k in apps}
+    wpscan_prefetch([slug for p in apps["wordpress"] for slug, _ in plugin_headers(p, "plugin")])
     for p in apps["wordpress"]:
         result["wordpress"].append(check_wordpress(p, vh))
     for p in apps["nextcloud"]:
@@ -1400,6 +1488,15 @@ def main():
         import traceback
         traceback.print_exc(file=sys.stderr)
         add("NIEDRIG", "Prüfung „%s“ mit Fehler abgebrochen" % sys.argv[1], "%s: %s" % (type(e).__name__, e))
+    if sys.argv[1] == "apps" and os.environ.get("WPSCAN_API_TOKEN"):
+        b = _wpscan_budget()
+        if b.get("blocked") == "token":
+            add("NIEDRIG", "WPScan-Token wird abgelehnt – Plugin-Lücken nicht geprüft",
+                "Token unter Einstellungen → Scan prüfen bzw. neu eintragen (wpscan.com → Profil)")
+        elif WPSCAN_SKIPPED:
+            add("INFO", "WPScan: %d Plugin(s) heute noch nicht geprüft – Tageskontingent verbraucht" % len(WPSCAN_SKIPPED),
+                "Heute %d von %d Abfragen genutzt; die übrigen Plugins kommen in den nächsten Tagen an die Reihe"
+                % (b.get("used", 0), WPSCAN_DAILY))
     if NET_FAIL:
         add("INFO", "Externe Versionsdaten nicht erreichbar – Versionsvergleiche teilweise übersprungen", *sorted(NET_FAIL))
     emit()

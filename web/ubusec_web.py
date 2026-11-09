@@ -1410,6 +1410,16 @@ def create_app():
             flash("„%s“ wird erneut geprüft." % MOD_TITLE[mod], "ok")
         return redirect(url_for("scan"))
 
+    @app.route("/wpscan/jetzt", methods=["POST"])
+    def wpscan_now():
+        st = read_status()
+        if st.get("running") or st.get("queued"):
+            flash("Es läuft bereits ein Scan.", "error")
+            return redirect(url_for("settings") + "#scan")
+        enqueue({"action": "scan", "mode": "quick", "only": "apps", "wpscan": "1", "user": session["user"]})
+        flash("WordPress-Plugins werden jetzt bei WPScan abgefragt (im Rahmen des Tageskontingents).", "ok")
+        return redirect(url_for("scan"))
+
     @app.route("/scan/abbrechen", methods=["POST"])
     def scan_cancel():
         st = read_status()
@@ -1755,7 +1765,10 @@ def create_app():
         users = load_users()
         me = users.get(session["user"], {})
         conf = read_json(os.path.join(STATE_DIR, "settings.json"), {}) or {}
-        return render_template("settings.html", users=sorted(users), me=me, conf=conf, DAYS=DAYS,
+        wpb = read_json(os.path.join(STATE_DIR, "wpscan-budget.json"), {}) or {}
+        if wpb.get("day") != time.strftime("%Y-%m-%d"):
+            wpb = {"used": 0}
+        return render_template("settings.html", wpb=wpb, users=sorted(users), me=me, conf=conf, DAYS=DAYS,
                                ignores=ignore_entries(), audit=audit_tail(), logins=read_json(LOGINS_FILE, [])[:15],
                                test=read_json(os.path.join(STATE_DIR, "notify-test.json")), status=read_status())
 
