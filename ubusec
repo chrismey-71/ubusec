@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.8"
+UBUSEC_VERSION="1.5.9"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -113,6 +113,10 @@ load_ignores() {
 
 SUPPRESSED=0
 # add SCHWERE MODUL MELDUNG [DETAIL ...]
+# apt-get wartet bis zu 5 Minuten, wenn gerade ein anderes apt läuft (z. B. unattended-upgrades),
+# statt sofort mit „Could not get lock /var/lib/dpkg/lock-frontend“ abzubrechen
+apt-get() { command apt-get -o DPkg::Lock::Timeout=300 "$@"; }
+
 add() {
   local sev=$1 mod=$2 msg=$3; shift 3
   local det="" i
@@ -2628,7 +2632,11 @@ web_user_cmd() { # web_user_cmd add|del NAME [--totp]
 
 do_install_web() {
   echo "→ Richte Weboberfläche ein …"
-  apt-get install -y -qq python3-flask python3-waitress qrencode || echo "  Warnung: python3-flask/python3-waitress/qrencode nicht installierbar"
+  if dpkg-query -W -f='${Status}\n' python3-flask python3-waitress qrencode 2>/dev/null | grep -c 'install ok installed' | grep -qx 3; then
+    :   # schon vorhanden – kein apt nötig (vermeidet Wartezeit, wenn gerade ein anderes apt läuft)
+  else
+    apt-get install -y -qq python3-flask python3-waitress qrencode || echo "  Warnung: python3-flask/python3-waitress/qrencode nicht installierbar"
+  fi
   getent group "$WEB_GROUP" >/dev/null || groupadd --system "$WEB_GROUP"
   id "$WEB_GROUP" >/dev/null 2>&1 || useradd --system --gid "$WEB_GROUP" --no-create-home \
     --home-dir /nonexistent --shell /usr/sbin/nologin "$WEB_GROUP"

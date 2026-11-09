@@ -2,6 +2,13 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.9 – 2026-11-09
+
+- **Update/Installation bricht nicht mehr ab, wenn gerade ein anderes apt läuft** (z. B. die automatischen
+  Sicherheitsupdates): ubusec wartet bis zu 5 Minuten auf die Paketverwaltung statt mit „Could not get lock
+  /var/lib/dpkg/lock-frontend“ abzubrechen. Bereits installierte Pakete der Weboberfläche werden nicht erneut
+  angefordert.
+
 ## 1.5.8 – 2026-11-09
 
 - **Fehler behoben:** Bei „Archive in Plugin-/App-Ordnern öffentlich abrufbar“ bot ubusec „Jetzt ändern“ an, lehnte
