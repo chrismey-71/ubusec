@@ -1584,8 +1584,10 @@ def create_app():
         if not path.startswith(base + os.sep) or not os.path.isfile(path) \
                 or not base.startswith(os.path.realpath(LOG_DIR) + os.sep):
             abort(404)
-        if os.path.getsize(path) > 5 * 1024 * 1024:
-            return send_file(path, as_attachment=True, download_name=name)
+        if request.args.get("download") == "1" or os.path.getsize(path) > 5 * 1024 * 1024:
+            dl = "%s-%s" % (r["id"], name)    # Bericht im Dateinamen, damit Downloads verschiedener Scans nicht kollidieren
+            return send_file(path, as_attachment=True, download_name=dl,
+                             mimetype="text/plain" if not name.endswith((".json", ".html")) else None)
         if name.endswith(".html"):
             resp = send_file(path, mimetype="text/html")
             resp.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"

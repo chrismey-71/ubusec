@@ -326,10 +326,17 @@ _H = [
         steps=["Paket ermitteln: dpkg -S <datei>", "Falls nicht beabsichtigt: sudo apt install --reinstall <paket>"],
         effort="prüfen")),
     (r"^integrity\|AIDE:", dict(
-        why="AIDE hat Dateiänderungen gegenüber dem gespeicherten Stand festgestellt.",
-        steps=["Änderungsliste im AIDE-Log prüfen (Link in den Details).",
-               "Wenn alle Änderungen erklärbar sind (Updates, eigene Arbeit): unten auf „Baseline übernehmen“ klicken "
-               "(oder sudo ubusec --accept)."], effort="prüfen")),
+        why="AIDE vergleicht alle System- und Programmdateien mit dem Stand, den es beim Einrichten (oder beim letzten "
+            "„Baseline übernehmen“) gespeichert hat. Nach Updates ändern sich viele Dateien – das ist erwartet. ubusec "
+            "ordnet die Liste deshalb ein: Was durch Paket-Updates seit diesem Stand erklärt ist, was in Protokoll- und "
+            "Cache-Ordnern liegt (normal) und was übrig bleibt – zusammengefasst je Ordner.",
+        steps=["Den Rest ansehen: Neue oder geänderte Dateien in /etc/cron*, /etc/systemd, /usr/local/bin, /root/.ssh, "
+               "/etc/sudoers.d oder Programme in /usr/bin ohne passendes Update sind genauer zu prüfen.",
+               "Zu einer Datei herausfinden, zu welchem Paket sie gehört und ob sie dem Original entspricht:",
+               "$ dpkg -S /pfad/zur/datei && sudo dpkg --verify PAKET",
+               "Die ganze Liste: Berichte → dieser Bericht → Rohdaten → aide.txt (mit Erklärung der Zeichen und zum Herunterladen).",
+               "Ist alles erklärbar (Updates, eigene Arbeit): „Baseline übernehmen“ – AIDE speichert dann im Hintergrund "
+               "einen neuen Stand."], effort="15 Min")),
 
     # ------------------------------------------------------------ baseline ---
     (r"^baseline\|Neue Benutzerkonten", dict(

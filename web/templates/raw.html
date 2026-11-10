@@ -3,5 +3,23 @@
 {% block content %}
 <p class="crumb"><a href="{{ url_for('reports') }}">Berichte</a> / <a href="{{ url_for('report', rid=r.id) }}">{{ r.label }} vom {{ r.started | dt }}</a></p>
 <h1 class="mono-title">{{ name }}</h1>
+<p><a class="btn" href="{{ url_for('raw_file', rid=r.id, name=name, download=1) }}" download>Herunterladen</a>
+  <span class="muted small">{{ text.count('\n') }} Zeilen</span></p>
+{% if name == 'aide.txt' %}
+<details class="howto" open><summary><b>So liest du die AIDE-Liste</b></summary>
+  <p class="small">Jede Zeile im Abschnitt „Added/Removed/Changed entries“ beginnt mit dem Typ (<code>f</code> Datei, <code>d</code> Ordner,
+    <code>l</code> Verknüpfung) und einer Zeichenkette:</p>
+  <ul class="small">
+    <li><code>f+++++++++++++++++</code> – <b>neu</b> seit dem AIDE-Stand</li>
+    <li><code>f-----------------</code> – <b>gelöscht</b> seit dem AIDE-Stand</li>
+    <li><code>f   ...    .C...</code> – <b>geändert</b>; die Buchstaben sagen was: <code>C</code> Inhalt (Prüfsumme), <code>p</code> Rechte,
+      <code>u</code>/<code>g</code> Besitzer/Gruppe, <code>m</code>/<code>c</code> Änderungszeit, <code>s</code> Größe, <code>i</code> Inode (Datei ersetzt), <code>.</code> unverändert</li>
+  </ul>
+  <p class="small">Nach Paket-Updates ändern sich viele Dateien unter <code>/usr</code> und <code>/etc</code> – das ist erwartet. ubusec ordnet die Liste
+    im Befund „AIDE: …“ bereits ein (durch Updates erklärt, Protokolle/Cache, Rest je Ordner). Verdächtig ist vor allem, was <b>nicht</b> durch
+    Updates erklärt ist, z. B. neue Dateien in <code>/etc/cron.*</code>, <code>/usr/local/bin</code>, <code>/root/.ssh</code> oder geänderte Programme
+    ohne passendes Update. Sind alle Änderungen erklärbar: in den Empfehlungen „Baseline übernehmen“.</p>
+</details>
+{% endif %}
 {% if text.strip() %}<pre class="raw">{{ text }}</pre>{% else %}<p class="muted">Die Datei ist leer.</p>{% endif %}
 {% endblock %}

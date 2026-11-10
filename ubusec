@@ -737,8 +737,70 @@ mod_integrity() {
     elif [ -f "$db" ]; then
       aide --config=/etc/aide/aide.conf --check >"$RAW/aide.txt" 2>&1; rc=$?
       if (( rc >= 1 && rc <= 7 )); then
-        add MITTEL integrity "AIDE: $(grep -E '^\s*(Added|Removed|Changed) entries' "$RAW/aide.txt" | awk -F: '{gsub(/ entries/,"",$1);gsub(/^[ \t]+/,"",$1);gsub(/[ \t]/,"",$2);printf "%s %s, ",$2,$1}' | sed 's/, $//') seit AIDE-Baseline" \
-          "Details: $RAW/aide.txt" "Nach Prüfung übernehmen: ubusec --accept"
+        # Liste einordnen: was erklären Paket-Updates seit dem AIDE-Stand, was bleibt übrig – zusammengefasst je Ordner
+        python3 -I - "$RAW/aide.txt" "$db" >"$RAW/aide-summary.txt" 2>/dev/null <<'PYA'
+import os, re, sys, glob, collections
+txt, db = sys.argv[1], sys.argv[2]
+since = os.path.getmtime(db)
+add, rem, chg = [], [], []
+for l in open(txt, errors="replace"):
+    m = re.match(r"^([a-zA-Z])([^:]{10,}):\s(/.*)$", l.rstrip("\n"))
+    if not m:
+        continue
+    flags, path = m.group(2).strip(), m.group(3)
+    (add if set(flags) <= {"+"} else rem if set(flags) <= {"-"} else chg).append(path)
+# Pakete, die seit dem AIDE-Stand installiert/aktualisiert wurden, und ihre Dateien
+import time
+pk = set()
+for f in sorted(glob.glob("/var/log/dpkg.log*")):
+    if f.endswith(".gz"):
+        continue
+    for l in open(f, errors="replace"):
+        m = re.match(r"^(\S+ \S+) status installed (\S+?)(:\S+)? ", l)
+        if m:
+            try:
+                if time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")) >= since:
+                    pk.add(m.group(2))
+            except ValueError:
+                pass
+owned = set()
+for p in pk:
+    for lst in glob.glob("/var/lib/dpkg/info/%s.list" % p) + glob.glob("/var/lib/dpkg/info/%s:*.list" % p):
+        owned.update(x.rstrip("\n") for x in open(lst, errors="replace"))
+NOISE = re.compile(r"^/(var/(log|cache|lib/(apt|dpkg|ucf|systemd|php/sessions|clamav|aide|ubusec|rkhunter))|run|tmp)/")
+def bucket(p):
+    parts = p.split("/")
+    return "/".join(parts[:3]) if len(parts) > 3 else p
+out = []
+total = len(add) + len(rem) + len(chg)
+expl = [p for p in add + rem + chg if p in owned or os.path.dirname(p) in owned]
+noise = [p for p in add + rem + chg if p not in owned and NOISE.match(p)]
+rest = [p for p in add + rem + chg if p not in owned and os.path.dirname(p) not in owned and not NOISE.match(p)]
+out.append("Neu %d · entfernt %d · geändert %d (insgesamt %d)" % (len(add), len(rem), len(chg), total))
+if expl:
+    out.append("%d davon durch Paket-Updates seit dem AIDE-Stand erklärt (%s%s)" % (
+        len(expl), ", ".join(sorted(pk)[:6]), " …" if len(pk) > 6 else ""))
+if noise:
+    out.append("%d in Protokoll-, Cache- und Arbeitsordnern (/var/log, /var/cache, /var/lib/apt …) – normal" % len(noise))
+if rest:
+    c = collections.Counter(bucket(p) for p in rest)
+    out.append("Nicht durch Updates erklärt: %d – nach Ordner: %s" % (
+        len(rest), ", ".join("%s (%d)" % kv for kv in c.most_common(8))))
+    for p in sorted(rest)[:12]:
+        kind = "neu" if p in add else "entfernt" if p in rem else "geändert"
+        out.append("  %s: %s" % (kind, p))
+print("REST\t%d" % len(rest))
+print("\n".join(out))
+PYA
+        local arest; arest=$(sed -n 's/^REST\t//p' "$RAW/aide-summary.txt"); arest=${arest:-1}
+        mapfile -t ITEMS < <(grep -v '^REST' "$RAW/aide-summary.txt")
+        if [ "$arest" = 0 ]; then
+          add NIEDRIG integrity "AIDE: Dateiänderungen seit dem AIDE-Stand – alle durch Updates oder Protokolle erklärt" \
+            "${ITEMS[@]}" "Ganze Liste: Bericht → Rohdaten → aide.txt (herunterladbar)" "Danach: „Baseline übernehmen“"
+        else
+          add MITTEL integrity "AIDE: $arest Dateiänderungen seit dem AIDE-Stand nicht durch Updates erklärt" \
+            "${ITEMS[@]}" "Ganze Liste: Bericht → Rohdaten → aide.txt (herunterladbar)" "Sind alle gewollt: „Baseline übernehmen“"
+        fi
       elif (( rc > 7 )); then
         add NIEDRIG integrity "AIDE-Prüfung fehlgeschlagen (Code $rc)" "Log: $RAW/aide.txt"
       fi
@@ -2013,9 +2075,13 @@ do_baseline() {
   echo "→ Lege Baseline an (Konten, Ports, SSH-Schlüssel, Cron, Dienste, SUID) …"
   write_baseline
   if have rkhunter; then echo "→ rkhunter --propupd"; rkhunter --propupd --nocolors >/dev/null 2>&1; fi
-  if have aideinit && { [ "$with_aide" = 1 ] || [ -f /var/lib/aide/aide.db ]; }; then
+  if have aideinit && [ "$with_aide" = 1 ]; then
     echo "→ AIDE-Datenbank wird erstellt (kann viele Minuten dauern) …"
     aideinit -y -f >/dev/null 2>&1 && [ -f /var/lib/aide/aide.db.new ] && cp /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+  elif have aideinit && [ -f /var/lib/aide/aide.db ]; then
+    # beim Übernehmen: AIDE-Stand im Hintergrund erneuern (dauert lange und soll die Weboberfläche nicht blockieren)
+    echo "→ AIDE-Datenbank wird im Hintergrund erneuert (Fortschritt: Weboberfläche → Werkzeuge)"
+    aide_init_bg
   fi
   echo "✔ Baseline gespeichert: $(cat "$BASE_DIR/.created")"
 }
@@ -2951,10 +3017,7 @@ main() {
     webuserdel) web_user_cmd del "$web_name"; exit 0 ;;
     baseline) do_baseline "$with_aide"; exit 0 ;;
     uninstall) do_uninstall; exit 0 ;;
-    accept) do_baseline 0
-            [ -f /var/lib/aide/aide.db.new ] && have aide && aide --config=/etc/aide/aide.conf --update >/dev/null 2>&1 \
-              && cp /var/lib/aide/aide.db.new /var/lib/aide/aide.db
-            exit 0 ;;
+    accept) do_baseline 0; exit 0 ;;
   esac
 
   if [ "$COLOR" = 0 ] && [ -t 1 ]; then COLOR=1; fi

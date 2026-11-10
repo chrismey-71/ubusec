@@ -39,7 +39,8 @@
   {% if raw_files %}
   <details class="rawlist">
     <summary>Rohdaten der Werkzeuge ({{ raw_files|length }} Dateien)</summary>
-    <ul>{% for n in raw_files %}<li><a href="{{ url_for('raw_file', rid=r.id, name=n) }}">{{ n }}</a></li>{% endfor %}</ul>
+    <ul>{% for n in raw_files %}<li><a href="{{ url_for('raw_file', rid=r.id, name=n) }}">{{ n }}</a>
+      · <a class="small" href="{{ url_for('raw_file', rid=r.id, name=n, download=1) }}" download>herunterladen</a></li>{% endfor %}</ul>
   </details>
   {% endif %}
 </section>

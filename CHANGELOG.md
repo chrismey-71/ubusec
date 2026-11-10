@@ -15,6 +15,13 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 - **Phased Updates nicht mehr als offene Updates gezählt:** Ubuntu verteilt manche Updates schrittweise; apt hält
   sie absichtlich zurück („Noch keine Aktualisierung wegen Phasenstufung“). ubusec meldet sie jetzt nur noch als Info
   („werden schrittweise verteilt – nichts zu tun“) statt als „weitere Paket-Updates verfügbar“.
+- **AIDE verständlich:** Statt nur „N Added, N Changed“ ordnet ubusec die AIDE-Liste ein – was durch Paket-Updates
+  seit dem AIDE-Stand erklärt ist, was in Protokoll- und Cache-Ordnern liegt (normal) und was übrig bleibt,
+  zusammengefasst je Ordner mit Beispieldateien. Sind alle Änderungen erklärt, nur noch NIEDRIG. Die Rohdatei aide.txt
+  zeigt eine Erklärung der Zeichen (f+++…, f---…, C, p, u …).
+- **Rohdaten herunterladen:** Jede Rohdatei eines Berichts (aide.txt, lynis.log …) hat jetzt einen Download-Link.
+- **„Baseline übernehmen“ blockiert nicht mehr:** Den neuen AIDE-Stand legt ubusec im Hintergrund an (Fortschritt
+  unter Werkzeuge), statt die Weboberfläche bis zu einer Stunde warten zu lassen.
 
 ## 1.5.13 – 2026-11-10
 
