@@ -2,6 +2,13 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.10 – 2026-11-10
+
+- **Lynis „Multiple accounts found with same UID“ [AUTH-9208] verständlich:** ubusec sieht selbst nach, welche Konten
+  sich eine UID teilen. Virtualmin-Webzugänge einer Domain (Heimatordner im Ordner des Domain-Besitzers, keine echte
+  Shell, z. B. `frenzel@domain` mit /bin/false) gelten als in Ordnung und erscheinen nur noch als Info. Andere Fälle
+  meldet ubusec als „Mehrere Benutzerkonten mit derselben UID“ mit den Kontonamen und einer Anleitung – UID 0 immer.
+
 ## 1.5.9 – 2026-11-09
 
 - **Update/Installation bricht nicht mehr ab, wenn gerade ein anderes apt läuft** (z. B. die automatischen

@@ -118,6 +118,18 @@ _H = [
             "kleiner Baustein; ab etwa 75 gilt ein Server als ordentlich gehärtet.",
         steps=["Vorschläge der Reihe nach durchgehen (Liste unten auf der Seite „Empfehlungen“).",
                "$ sudo lynis show details <TEST-ID>"], effort="1 Std")),
+    (r"^config\|Mehrere Benutzerkonten mit derselben UID", dict(
+        why="Konten mit derselben Benutzernummer (UID) sind für Linux dieselbe Person: gleiche Rechte, gleiche Dateien. "
+            "Bei Virtualmin ist das für Webzugänge einer Domain normal – diese erkennt ubusec und meldet sie nicht. "
+            "Die hier genannten passen nicht in dieses Muster: ein zweites Konto mit eigener Shell oder außerhalb des "
+            "Heimatordners. Angreifer legen so manchmal unauffällig ein Zweitkonto an – besonders verdächtig bei UID 0 (root).",
+        steps=["Für jede genannte UID ansehen, wer dazugehört (UID einsetzen):",
+               "$ awk -F: '$3==1003 {print $1, $6, $7}' /etc/passwd",
+               "Kennst du jedes Konto und ist es gewollt: Meldung ausblenden.",
+               "Unbekanntes Konto: nicht löschen, sondern erst sperren und prüfen, seit wann es existiert:",
+               "$ sudo usermod -L -s /usr/sbin/nologin KONTONAME",
+               "$ sudo grep -n KONTONAME /var/log/auth.log*",
+               "Bei einem unbekannten Konto mit UID 0 den Server als kompromittiert behandeln."], effort="15 Min")),
     (r"^config\|SSH: Root-Login mit Passwort", dict(
         why="Root ist der erste Benutzername, den Angreifer ausprobieren – jeder Server im Internet bekommt täglich "
             "tausende Rateversuche. Mit Passwort-Login genügt ein erratenes Passwort für die volle Kontrolle. Mit "

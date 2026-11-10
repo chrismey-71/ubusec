@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.9"
+UBUSEC_VERSION="1.5.10"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -376,6 +376,28 @@ PY2
 # ============================================================================
 #  MODUL: config – Lynis-Audit, SSH, sysctl, Konten, Schutzdienste
 # ============================================================================
+uid_dupes() { # Lynis AUTH-9208 genauer: Konten mit gleicher UID – bei Virtualmin meist Webzugänge einer Domain
+  # Ein Zweitkonto gilt als Virtualmin-Webzugang, wenn sein Heimatordner im Ordner des Erstkontos liegt und es keine
+  # echte Shell hat (/bin/false, nologin) – so legt Virtualmin FTP/SFTP-Zugänge zu den Webdateien an.
+  local ok=() bad=() line
+  while IFS= read -r line; do
+    case $line in OK*) ok+=("${line#OK }") ;; BAD*) bad+=("${line#BAD }") ;; esac
+  done < <(awk -F: '{ n[$3]++; u[$3]=u[$3] SUBSEP $1 "|" $6 "|" $7 }
+    END { for (id in n) if (n[id] > 1) {
+      k = split(substr(u[id], 2), a, SUBSEP); split(a[1], p, "|"); good = 1; names = p[1]
+      for (i = 2; i <= k; i++) { split(a[i], q, "|"); names = names ", " q[1]
+        if (!(index(q[2] "/", p[2] "/") == 1 && q[3] ~ /(false|nologin|\/dev\/null)$/)) good = 0 }
+      if (id == 0) good = 0
+      printf "%s UID %s: %s\n", (good ? "OK" : "BAD"), id, names } }' /etc/passwd 2>/dev/null)
+  if [ ${#bad[@]} -gt 0 ]; then
+    add MITTEL config "Mehrere Benutzerkonten mit derselben UID (Lynis AUTH-9208)" "${bad[@]}" \
+      "Prüfen: awk -F: '\$3==UID {print \$1, \$6, \$7}' /etc/passwd  (UID einsetzen)"
+  fi
+  if [ ${#ok[@]} -gt 0 ]; then
+    add INFO config "Konten mit gleicher UID sind Virtualmin-Webzugänge (in Ordnung)" "${ok[@]}"
+  fi
+}
+
 mod_config() {
   # --- Lynis ---------------------------------------------------------------
   if need lynis config lynis; then
@@ -414,6 +436,7 @@ mod_config() {
     hi=$(awk -F= '/^hardening_index=/{print $2; exit}' "$RAW/lynis-report.dat" 2>/dev/null)
     while IFS= read -r line; do
       id=${line%%|*}; txt=${line#*|}; txt=${txt%%|*}
+      if [ "$id" = AUTH-9208 ]; then uid_dupes; continue; fi
       add MITTEL config "Lynis-Warnung: $txt [$id]" "Details: sudo lynis show details $id"
     done < <(sed -n 's/^warning\[\]=//p' "$RAW/lynis-report.dat" 2>/dev/null)
     # Vorschläge: mit Detail (z. B. welche SSH-Option), ohne Doppelte, ohne Tests, die schon als Warnung erscheinen;
