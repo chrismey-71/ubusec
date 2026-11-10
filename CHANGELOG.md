@@ -2,6 +2,15 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.11 – 2026-11-10
+
+- **„Soll ich das für dich prüfen?“ bei verdächtigen PHP-Dateien vergleicht jetzt mit dem Original.** Findet ubusec
+  Webshell-Muster (z. B. `system($_GET`), holt es dieselbe Datei in derselben Version aus der Quelle der Anwendung –
+  Mautic von GitHub, WordPress-Kern und -Plugins von wordpress.org – und vergleicht Byte für Byte. Identisch heißt:
+  Teil der Anwendung (meist Testdaten), „Alles in Ordnung“ mit Ausblenden-Knopf. Bisher meldete die Prüfung solche
+  Testdateien als „Abweichung gefunden“ und bot kein Ausblenden an. In Test-Ordnern ohne abrufbares Original lautet
+  das Ergebnis „nicht eindeutig“ statt Alarm.
+
 ## 1.5.10 – 2026-11-10
 
 - **Lynis „Multiple accounts found with same UID“ [AUTH-9208] verständlich:** ubusec sieht selbst nach, welche Konten

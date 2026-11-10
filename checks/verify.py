@@ -210,6 +210,56 @@ SHELL_RX = re.compile(r"eval\s*\(\s*(base64_decode|gzinflate|gzuncompress|str_ro
                       r"|\$GLOBALS\[.{0,40}\]\[[0-9]+\]\(|move_uploaded_file\s*\(|file_put_contents\s*\([^;]{0,80}\$_(GET|POST|REQUEST)", re.I)
 
 
+def _http_get(url, limit=4 << 20):
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "ubusec-verify"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.read(limit)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def original_of(p):
+    """Original derselben Datei aus der Quelle der Anwendung holen (gleiche Version).
+    Liefert (Inhalt, Beschreibung) oder (None, Grund). Unterstützt: Mautic (GitHub), WordPress-Kern und -Plugins (SVN)."""
+    # Mautic: …/app/bundles/… mit app/release_metadata.json
+    m = re.match(r"^(.*?/)(app/bundles/.+)$", p)
+    if m and os.path.isfile(m.group(1) + "app/release_metadata.json"):
+        try:
+            ver = json.load(open(m.group(1) + "app/release_metadata.json")).get("version", "")
+        except (OSError, ValueError):
+            ver = ""
+        if re.match(r"^\d+\.\d+\.\d+[\w.-]*$", ver):
+            data = _http_get("https://raw.githubusercontent.com/mautic/mautic/%s/%s" % (ver, m.group(2)))
+            return (data, "Mautic %s auf GitHub" % ver) if data is not None else (None, "Mautic %s: Original nicht abrufbar" % ver)
+    # WordPress-Plugin: …/wp-content/plugins/<slug>/<datei>
+    m = re.match(r"^(.*?/wp-content/plugins/)([a-z0-9_-]+)/(.+)$", p)
+    if m:
+        ver = ""
+        for main in glob.glob(m.group(1) + m.group(2) + "/*.php"):
+            try:
+                head = open(main, encoding="utf-8", errors="replace").read(8192)
+            except OSError:
+                continue
+            mv = re.search(r"(?im)^[ \t/*#@]*Version:\s*([0-9][^\s*]*)", head)
+            if mv and re.search(r"(?im)^[ \t/*#@]*Plugin Name:", head):
+                ver = mv.group(1)
+                break
+        if ver:
+            data = _http_get("https://plugins.svn.wordpress.org/%s/tags/%s/%s" % (m.group(2), ver, m.group(3)))
+            return (data, "Plugin %s %s auf wordpress.org" % (m.group(2), ver)) if data is not None \
+                else (None, "Plugin %s %s: Original nicht abrufbar" % (m.group(2), ver))
+    # WordPress-Kern: wp-admin/ oder wp-includes/
+    m = re.match(r"^(.*?/)((?:wp-admin|wp-includes)/.+)$", p)
+    if m and os.path.isfile(m.group(1) + "wp-includes/version.php"):
+        mv = re.search(r"\$wp_version\s*=\s*'([^']+)'", open(m.group(1) + "wp-includes/version.php").read())
+        if mv:
+            data = _http_get("https://core.svn.wordpress.org/tags/%s/%s" % (mv.group(1), m.group(2)))
+            return (data, "WordPress %s" % mv.group(1)) if data is not None else (None, "WordPress %s: Original nicht abrufbar" % mv.group(1))
+    return None, ""
+
+
 def phpscan(paths):
     """PHP-Dateien auf Schadcode prüfen: typische Webshell-Muster und Virenscanner."""
     rows, files = [], [p for p in paths if os.path.isfile(p)]
@@ -243,10 +293,33 @@ def phpscan(paths):
         hits = sorted(set(m.group(0)[:40] for m in SHELL_RX.finditer(txt)))[:3]
         info = "%d Bytes, Besitzer %s, geändert %s; erste Zeile: %s" % (
             st.st_size, own, time.strftime("%d.%m.%Y %H:%M", time.localtime(st.st_mtime)), first or "(leer)")
+        orig, src = (None, "")
+        if p in clam or hits:
+            # Bevor Alarm geschlagen wird: mit dem Original derselben Version vergleichen (Testdaten in Mautic, Plugins …)
+            orig, src = original_of(p)
+            if orig is not None:
+                try:
+                    with open(p, "rb") as f:
+                        mine = f.read()
+                except OSError:
+                    mine = b""
+                if mine.replace(b"\r\n", b"\n") == orig.replace(b"\r\n", b"\n"):
+                    rows.append({"item": p, "result": "Byte für Byte identisch mit dem Original (%s) – die Muster sind Teil der "
+                                 "Anwendung (z. B. Testdaten), kein eingeschleuster Code. Gefunden: %s"
+                                 % (src, ", ".join(hits) or clam.get(p, "")), "state": "ok"})
+                    continue
+                src = "weicht vom Original (%s) ab" % src
+        testdir = bool(re.search(r"/(tests?|Tests?|spec|fixtures)/", p))
         if p in clam:
-            rows.append({"item": p, "result": "VIRENSCANNER: %s – %s" % (clam[p], info), "state": "bad"})
+            rows.append({"item": p, "result": "VIRENSCANNER: %s – %s%s" % (clam[p], info, " – " + src if src else ""),
+                         "state": "bad"})
+        elif hits and testdir and orig is None:
+            rows.append({"item": p, "result": "verdächtige Befehle in einem Test-Ordner: %s – %s. %s – bitte mit dem "
+                         "Original vergleichen oder den Test-Ordner entfernen." % (", ".join(hits), info, src or "Original nicht ermittelbar"),
+                         "state": "warn"})
         elif hits:
-            rows.append({"item": p, "result": "verdächtige Befehle: %s – %s" % (", ".join(hits), info), "state": "bad"})
+            rows.append({"item": p, "result": "verdächtige Befehle: %s – %s%s" % (", ".join(hits), info, " – " + src if src else ""),
+                         "state": "bad"})
         elif re.search(r"base64_decode|gzinflate|eval\s*\(|\\x[0-9a-f]{2}\\x[0-9a-f]{2}\\x", txt, re.I):
             rows.append({"item": p, "result": "enthält verschleierten Code (eval/base64) – genauer ansehen – " + info, "state": "warn"})
         else:
