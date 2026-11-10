@@ -2,6 +2,13 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.12 – 2026-11-10
+
+- **Fehlalarm behoben:** ClamAV meldete die Signaturdatei von Linux Malware Detect
+  (`/usr/local/maldetect/sigs/rfxn.yara`) als „Html.Downloader.Satan…“ – Signaturdateien enthalten absichtlich
+  Schadcode-Muster. Signatur-, Quarantäne- und Arbeitsordner von Linux Malware Detect, rkhunter und chkrootkit
+  werden beim Virenscan jetzt ausgelassen.
+
 ## 1.5.11 – 2026-11-10
 
 - **„Soll ich das für dich prüfen?“ bei verdächtigen PHP-Dateien vergleicht jetzt mit dem Original.** Findet ubusec

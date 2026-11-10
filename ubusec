@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.11"
+UBUSEC_VERSION="1.5.12"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -1152,6 +1152,10 @@ clam_excludes() {
   local p
   printf '%s\n' /proc /sys /dev /run /snap /var/lib/docker /var/lib/containerd /var/lib/lxcfs /var/lib/clamav \
     "$LOG_DIR" "$STATE_DIR" /swapfile /swap.img
+  # Signaturen und Quarantäne anderer Virenscanner enthalten absichtlich Schadcode-Muster – sonst meldet ClamAV
+  # z. B. /usr/local/maldetect/sigs/rfxn.yara als „Html.Downloader…“ (Fehlalarm, kein Befall)
+  printf '%s\n' /usr/local/maldetect/sigs /usr/local/maldetect/quarantine /usr/local/maldetect/tmp \
+    /usr/local/maldetect/clean /var/lib/rkhunter/db /var/lib/chkrootkit
   [ "$CLAM_EXCLUDE_DB" = 1 ] && printf '%s\n' /var/lib/mysql /var/lib/postgresql /var/lib/mongodb /var/lib/redis
   [ "$CLAM_EXCLUDE_BACKUPS" = 1 ] && backup_dirs
   if [ "$CLAM_EXCLUDE_LOGS" = 1 ]; then echo /var/log; for p in /home/*/logs /home/*/domains/*/logs; do [ -d "$p" ] && echo "$p"; done; fi
