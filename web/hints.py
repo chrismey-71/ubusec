@@ -210,9 +210,17 @@ _H = [
         why="Ein Konto ohne Passwort kann je nach Dienst ohne Anmeldung genutzt werden.",
         steps=["Konto sperren oder Passwort setzen:", "$ sudo passwd -l <name>"], effort="5 Min")),
     (r"^config\|sudo ohne Passwort", dict(
-        why="Wer das Benutzerkonto übernimmt, wird mit NOPASSWD sofort root, ohne weitere Hürde.",
-        steps=["$ sudo visudo -f /etc/sudoers.d/<datei>",
-               "NOPASSWD entfernen oder auf einzelne, ungefährliche Befehle beschränken."], effort="15 Min")),
+        why="Wer das Benutzerkonto übernimmt, wird mit NOPASSWD sofort root, ohne weitere Hürde. Auf Cloud-Servern legt "
+            "die Erstinstallation das oft für den Standardbenutzer „ubuntu“ an (Datei 90-cloud-init-users) – auch wenn "
+            "du dieses Konto nie benutzt.",
+        steps=["Erst klären, ob jemand das Konto benutzt (letzte Anmeldungen):",
+               "$ last -n 5 BENUTZER; sudo ls -la /home/BENUTZER/.ssh/",
+               "Wird es nicht gebraucht: Konto sperren und die sudo-Regel entfernen (nicht das Konto, mit dem du gerade "
+               "arbeitest!):",
+               "$ sudo usermod -L -s /usr/sbin/nologin BENUTZER",
+               "$ sudo rm /etc/sudoers.d/90-cloud-init-users",
+               "Wird es gebraucht: NOPASSWD entfernen (dann fragt sudo nach dem Passwort des Kontos):",
+               "$ sudo visudo -f /etc/sudoers.d/DATEI"], effort="10 Min")),
     (r"^config\|AppArmor ist nicht aktiv", dict(
         why="AppArmor sperrt Dienste in ihre vorgesehenen Bereiche. Ohne es kann ein übernommener Dienst mehr anrichten.",
         steps=["$ sudo systemctl enable --now apparmor", "$ sudo aa-status"], effort="5 Min")),

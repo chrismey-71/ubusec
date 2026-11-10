@@ -451,6 +451,9 @@ mod_config() {
             t = $2; d = $3
             # diese SSH-Optionen prüft ubusec selbst (eigene Befunde mit Anleitung)
             if (id == "SSH-7408" && d ~ /^(PermitRootLogin|PasswordAuthentication|X11Forwarding|MaxAuthTries|KbdInteractiveAuthentication|PermitEmptyPasswords)/) next
+            # Vorschläge ohne Zielwert („Port (set 22 to )“) sind nicht umsetzbar; debsums ersetzt ubusec durch die
+            # eigene Paketprüfung (dpkg --verify plus Vergleich mit dem Originalpaket)
+            if (d ~ /to \)$/ || id == "PKGS-7370") next
             if (d != "" && d != "-" && index(t, d) == 0) t = t ": " d
             line = t " [" $1 "]"
             if (!(line in seen)) { seen[line] = 1; print line } }
@@ -543,7 +546,8 @@ mod_config() {
   [ -n "$u" ] && add KRITISCH config "Weitere Konten mit UID 0 (Root-Rechte): $u"
   u=$(awk -F: '$2==""{printf "%s ",$1}' /etc/shadow 2>/dev/null)
   [ -n "$u" ] && add KRITISCH config "Konten ohne Passwort: $u"
-  grep -hsE '^[^#].*NOPASSWD' /etc/sudoers /etc/sudoers.d/* >"$RAW/sudo-nopasswd.txt"
+  # mit Dateiname (bei Cloud-Servern meist /etc/sudoers.d/90-cloud-init-users für den Standardbenutzer „ubuntu“)
+  grep -HsE '^[^#].*NOPASSWD' /etc/sudoers /etc/sudoers.d/* | sed 's/^\([^:]*\):/\1: /' >"$RAW/sudo-nopasswd.txt"
   if [ -s "$RAW/sudo-nopasswd.txt" ]; then take "$RAW/sudo-nopasswd.txt" 5
     add NIEDRIG config "sudo ohne Passwort (NOPASSWD) konfiguriert" "${ITEMS[@]}"
   fi

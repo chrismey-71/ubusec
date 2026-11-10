@@ -8,6 +8,13 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   sich eine UID teilen. Virtualmin-Webzugänge einer Domain (Heimatordner im Ordner des Domain-Besitzers, keine echte
   Shell, z. B. `frenzel@domain` mit /bin/false) gelten als in Ordnung und erscheinen nur noch als Info. Andere Fälle
   meldet ubusec als „Mehrere Benutzerkonten mit derselben UID“ mit den Kontonamen und einer Anleitung – UID 0 immer.
+- **KI-Fassung und Downloads genauer:** Bei langen Listen, die ubusec schon beim Scan kürzt (z. B. offene
+  Sicherheitsmeldungen), fehlte in den Exporten der Hinweis „… und N weitere“. Benutzernamen werden nicht mehr in
+  Webadressen ersetzt – ein Systembenutzer „ubuntu“ machte aus ubuntu.com/pro „benutzer-1.com/pro“.
+- **sudo ohne Passwort:** Die Meldung nennt jetzt die Datei (z. B. `/etc/sudoers.d/90-cloud-init-users`); der
+  Hinweis erklärt den Cloud-Standardbenutzer und wie man ihn gefahrlos sperrt.
+- Lynis-Vorschläge ohne umsetzbaren Zielwert („Port (set 22 to )“) und „debsums installieren“ (ubusec prüft Pakete
+  selbst) werden nicht mehr aufgeführt.
 
 ## 1.5.9 – 2026-11-09
 

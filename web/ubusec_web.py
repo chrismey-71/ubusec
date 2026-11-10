@@ -687,6 +687,8 @@ def export_context(state, todo, lynis):
             "severity": f["severity"], "module": MOD_TITLE.get(f["module"], f["module"]), "raw_module": f["module"],
             "message": f["message"],
             "details": [d for d in f.get("details", []) if not d.startswith("… und ")],
+            # ubusec kürzt lange Listen schon beim Scan („… und 4 weitere → Datei“) – die Anzahl mitnehmen
+            "more": sum(int(m.group(1)) for d in f.get("details", []) for m in [re.match(r"… und (\d+) weitere", d)] if m),
             "why": h.get("why", ""), "effort": h.get("effort", ""),
             "steps": [(st[2:], True) if st.startswith("$ ") else (st, False) for st in h.get("steps", [])],
             "checked": datetime.fromtimestamp(src.get("finished", 0)).strftime("%d.%m.%Y %H:%M") if src.get("finished") else "",
@@ -708,7 +710,8 @@ def export_markdown(c):
             L += ["### %d. %s%s" % (n, i["message"], " (neu)" if i["new"] else ""), "",
                   "*%s · %s · geprüft %s%s*" % (SEV_NAME[s], i["module"], i["checked"],
                                                   " · Aufwand: " + i["effort"] if i["effort"] else ""), ""]
-            L += ["- %s" % d for d in i["details"]] + ([""] if i["details"] else [])
+            L += ["- %s" % d for d in i["details"]] + (["- … und %d weitere" % i["more"]] if i.get("more") else []) \
+                + ([""] if i["details"] else [])
             if i["why"]:
                 L += ["**Warum:** " + i["why"], ""]
             if i["steps"]:
@@ -832,7 +835,8 @@ def export_xlsx(c):
     order = {s: n for n, s in enumerate(SEVERITIES)}
     for i in sorted(c["items"], key=lambda x: order.get(x["severity"], 9)):
         steps = "\n".join(("$ " + t) if cmd else ("• " + t) for t, cmd in i["steps"])
-        det = i["details"][:15] + (["… und %d weitere" % (len(i["details"]) - 15)] if len(i["details"]) > 15 else [])
+        more = max(0, len(i["details"]) - 15) + i.get("more", 0)
+        det = i["details"][:15] + (["… und %d weitere" % more] if more else [])
         rows.append([("offen", 9), (SEV_NAME[i["severity"]], sev_style.get(i["severity"], 2)), (i["module"], 2),
                      (i["message"], 7), ("\n".join(det), 2), (i["why"], 2), (steps, 2), (i["effort"], 2),
                      ("neu" if i["new"] else "", 2), (i["checked"], 2), ("", 2)])
@@ -911,7 +915,8 @@ def export_html(c):
                 color[s], n, e(i["message"]), " (neu)" if i["new"] else "", SEV_NAME[s], e(i["module"]), e(i["checked"]),
                 " · Aufwand: " + e(i["effort"]) if i["effort"] else ""))
             if i["details"]:
-                H.append("<ul>" + "".join("<li>%s</li>" % e(d) for d in i["details"]) + "</ul>")
+                H.append("<ul>" + "".join("<li>%s</li>" % e(d) for d in i["details"])
+                         + ("<li>… und %d weitere</li>" % i["more"] if i.get("more") else "") + "</ul>")
             if i["why"]:
                 H.append("<p><b>Warum:</b> %s</p>" % e(i["why"]))
             if i["steps"]:
@@ -989,7 +994,8 @@ class Anonymizer:
             self.dom_rx = None
         if users:
             alt = "|".join(re.escape(u) for u in users)
-            self.user_rx = re.compile(r"(?<![\w.-])(%s)(?![\w-])" % alt)
+            # nicht ersetzen, wenn der Name Teil eines Domainnamens ist (Benutzer „ubuntu“ ↔ ubuntu.com/pro)
+            self.user_rx = re.compile(r"(?<![\w.-])(%s)(?![\w-])(?!\.[A-Za-z]{2,})" % alt)
         else:
             self.user_rx = None
 
@@ -1079,8 +1085,9 @@ def export_ai(c, os_name=""):
             L.append("Bereich: %s" % i["module"])
             det = list(dict.fromkeys(an(d) for d in i["details"][:8]))
             L += ["- " + d for d in det]
-            if len(i["details"]) > 8:
-                L.append("- … und %d weitere gleichartige Einträge" % (len(i["details"]) - 8))
+            more = max(0, len(i["details"]) - 8) + i.get("more", 0)
+            if more:
+                L.append("- … und %d weitere gleichartige Einträge" % more)
             if i["steps"]:
                 L.append("Vorschlag von ubusec: " + " | ".join(an(t) for t, _ in i["steps"]))
             L.append("")
