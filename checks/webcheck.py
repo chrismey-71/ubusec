@@ -881,8 +881,17 @@ def wpscan_vulns(slug, version):
     out = []
     for v in (d[slug] or {}).get("vulnerabilities", []) or []:
         fixed = v.get("fixed_in")
-        if not fixed or vt(version) < vt(fixed):
-            out.append("%s%s" % (v.get("title", "?")[:110], " (behoben in %s)" % fixed if fixed else " (noch kein Fix)"))
+        title = v.get("title", "?")
+        if fixed:
+            if version and vt(version) >= vt(fixed):
+                continue
+        elif version:
+            # Ohne „fixed_in“ steht der betroffene Bereich meist nur im Titel („Plugin <= 3.3.3 - …“).
+            # Liegt die installierte Version darüber, ist sie nicht betroffen.
+            m = re.search(r"(<=|<)\s*v?(\d+(?:\.\d+)*)", title)
+            if m and (vt(version) > vt(m.group(2)) if m.group(1) == "<=" else vt(version) >= vt(m.group(2))):
+                continue
+        out.append("%s%s" % (title[:110], " (behoben in %s)" % fixed if fixed else " (noch kein Fix)"))
     return out
 
 

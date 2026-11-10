@@ -13,6 +13,9 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   Webadressen ersetzt – ein Systembenutzer „ubuntu“ machte aus ubuntu.com/pro „benutzer-1.com/pro“.
 - **sudo ohne Passwort:** Die Meldung nennt jetzt die Datei (z. B. `/etc/sudoers.d/90-cloud-init-users`); der
   Hinweis erklärt den Cloud-Standardbenutzer und wie man ihn gefahrlos sperrt.
+- **WPScan: weniger Fehlalarme bei Lücken „noch ohne Fix“.** WPScan nennt den betroffenen Bereich dann oft nur im Titel
+  („Add From Server <= 3.3.3 – …“). ubusec wertet diese Angabe jetzt aus: Ist die installierte Version neuer, wird die
+  Lücke nicht mehr gemeldet.
 - Lynis-Vorschläge ohne umsetzbaren Zielwert („Port (set 22 to )“) und „debsums installieren“ (ubusec prüft Pakete
   selbst) werden nicht mehr aufgeführt.
 
