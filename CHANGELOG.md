@@ -8,6 +8,10 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   (`/usr/local/maldetect/sigs/rfxn.yara`) als „Html.Downloader.Satan…“ – Signaturdateien enthalten absichtlich
   Schadcode-Muster. Signatur-, Quarantäne- und Arbeitsordner von Linux Malware Detect, rkhunter und chkrootkit
   werden beim Virenscan jetzt ausgelassen.
+- **Schritt „Webshells & Web-Malware“ zeigt Fortschritt und ist im Schnellscan deutlich schneller:** Die Weboberfläche
+  zeigt jetzt, was gerade passiert („Suche Webshell-Muster in PHP-Dateien – 12 000 von 48 000 Dateien“ mit
+  geschätzter Restzeit; „Linux Malware Detect … – läuft seit 4 Min.“). Linux Malware Detect prüft im Schnellscan nur
+  noch Dateien, die in den letzten 2 Tagen geändert wurden (maldet -r); alles durchsucht es im Vollscan.
 
 ## 1.5.11 – 2026-11-10
 
