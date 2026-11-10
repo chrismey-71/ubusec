@@ -2,6 +2,14 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.14 – 2026-11-10
+
+- **Linux Malware Detect durchsuchte die Websites gar nicht:** Bis 1.5.12 übergab ubusec die Ordner als
+  Komma-Liste („/var/www,/home“), die maldet nicht versteht – es durchsuchte dadurch nur seine Zusatzordner /tmp,
+  /var/tmp und /dev/shm, darunter die Zehntausenden Dateien, die Collabora Online in /tmp entpackt (Laufzeit über
+  2 Stunden). Seit 1.5.13 wird jeder Ordner einzeln übergeben; jetzt lässt maldet außerdem /tmp aus (prüft ClamAV)
+  und übernimmt die Ausnahmen des Virenscans (Nextcloud-Daten, Backups, Datenbanken …).
+
 ## 1.5.13 – 2026-11-10
 
 - **Schritt „Webshells & Web-Malware“ zeigt Fortschritt und ist im Schnellscan deutlich schneller:** Die Weboberfläche

@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.13"
+UBUSEC_VERSION="1.5.14"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -1581,7 +1581,17 @@ WPAT
   fi
 
   if have maldet; then
-    # Schnellscan: nur Dateien der letzten 2 Tage (maldet -r); Vollscan: alles (maldet -a)
+    # maldet an ubusec angleichen: dieselben Ausnahmen wie beim Virenscan (Nextcloud-Daten, Backups, Datenbanken …)
+    # und /tmp nicht mitdurchsuchen – dort entpackt z. B. Collabora Online Zehntausende eigene Dateien, und /tmp
+    # prüfen ClamAV und die Prozess-Prüfung von ubusec bereits. /var/tmp und /dev/shm bleiben drin.
+    local mconf=/usr/local/maldetect/conf.maldet mign=/usr/local/maldetect/ignore_paths
+    if [ -f "$mconf" ]; then
+      if grep -q '^scan_tmpdir_paths=' "$mconf"; then sed -i 's|^scan_tmpdir_paths=.*|scan_tmpdir_paths="/var/tmp /dev/shm"|' "$mconf"
+      else echo 'scan_tmpdir_paths="/var/tmp /dev/shm"' >>"$mconf"; fi
+      { cat "$mign" 2>/dev/null; clam_excludes; } | grep '^/' | sort -u >"$mign.new" && mv -f "$mign.new" "$mign"
+    fi
+    # Schnellscan: nur Dateien der letzten 2 Tage (maldet -r); Vollscan: alles (maldet -a) – je Ordner einzeln,
+    # maldet versteht keine durch Komma getrennte Liste (bis 1.5.12 wurde dadurch nur /tmp durchsucht)
     local r days=2
     : >"$RAW/maldet.txt"
     for r in "${roots[@]}"; do
