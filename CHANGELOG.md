@@ -12,6 +12,9 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 - **Linux Malware Detect übernimmt die Einstellung „Parallele Prüfungen“** (dort höchstens 8 gleichzeitige Prüfungen;
   „Automatisch“ überlässt die Wahl maldet: 2 je Prozessorkern, höchstens 8). Läuft der ClamAV-Dienst, nutzt maldet ihn
   für seinen ClamAV-Teil ohnehin selbst.
+- **Phased Updates nicht mehr als offene Updates gezählt:** Ubuntu verteilt manche Updates schrittweise; apt hält
+  sie absichtlich zurück („Noch keine Aktualisierung wegen Phasenstufung“). ubusec meldet sie jetzt nur noch als Info
+  („werden schrittweise verteilt – nichts zu tun“) statt als „weitere Paket-Updates verfügbar“.
 
 ## 1.5.13 – 2026-11-10
 

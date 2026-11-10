@@ -217,8 +217,17 @@ mod_updates() {
     || add NIEDRIG updates "apt-get update fehlgeschlagen – Update-Daten evtl. veraltet" "Log: $RAW/apt-update.log"
 
   apt list --upgradable 2>/dev/null | grep -v '^Listing' >"$RAW/upgradable.txt"
-  grep -- '-security' "$RAW/upgradable.txt" | cut -d/ -f1 >"$RAW/upg-security.txt"
-  grep -v -- '-security' "$RAW/upgradable.txt" | cut -d/ -f1 >"$RAW/upg-other.txt"
+  # Ubuntu verteilt manche Updates schrittweise („Phased Updates“) – apt hält sie absichtlich noch zurück, sie lassen
+  # sich (noch) nicht einspielen. Diese nicht als offene Updates zählen, sondern nur als Info nennen.
+  LC_ALL=C apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null \
+    | awk '/deferred due to phasing:/{f=1; next} f && /^  /{for(i=1;i<=NF;i++) print $i; next} {f=0}' \
+    | sort -u >"$RAW/upg-phased.txt"
+  grep -- '-security' "$RAW/upgradable.txt" | cut -d/ -f1 | grep -vxFf "$RAW/upg-phased.txt" >"$RAW/upg-security.txt"
+  grep -v -- '-security' "$RAW/upgradable.txt" | cut -d/ -f1 | grep -vxFf "$RAW/upg-phased.txt" >"$RAW/upg-other.txt"
+  if [ -s "$RAW/upg-phased.txt" ]; then take "$RAW/upg-phased.txt" 12
+    add INFO updates "$(grep -c . "$RAW/upg-phased.txt") Updates werden von Ubuntu schrittweise verteilt (Phased Updates) – noch nicht installierbar" \
+      "${ITEMS[@]}" "apt spielt sie automatisch ein, sobald dieser Server an der Reihe ist – nichts zu tun"
+  fi
   local ns no
   ns=$(grep -c . "$RAW/upg-security.txt"); no=$(grep -c . "$RAW/upg-other.txt")
   if (( ns > 0 )); then take "$RAW/upg-security.txt" 12
