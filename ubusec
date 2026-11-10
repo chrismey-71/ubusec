@@ -1592,16 +1592,19 @@ WPAT
     fi
     # Schnellscan: nur Dateien der letzten 2 Tage (maldet -r); Vollscan: alles (maldet -a) – je Ordner einzeln,
     # maldet versteht keine durch Komma getrennte Liste (bis 1.5.12 wurde dadurch nur /tmp durchsucht)
-    local r days=2
+    local r days=2 mw=auto
+    # Parallele Prüfungen: Einstellung „Parallele Prüfungen“ übernehmen (maldet erlaubt höchstens 8);
+    # „Automatisch“ überlässt es maldet (2 je CPU-Kern, höchstens 8). Läuft der ClamAV-Dienst, nutzt maldet ihn selbst.
+    if [ "${CLAM_PARALLEL:-0}" -gt 0 ] 2>/dev/null; then mw=$(( CLAM_PARALLEL > 8 ? 8 : CLAM_PARALLEL )); fi
     : >"$RAW/maldet.txt"
     for r in "${roots[@]}"; do
       if [ "$MODE" = full ]; then
         log "   Linux Malware Detect durchsucht: $r (vollständig)"
-        run_heartbeat "Linux Malware Detect durchsucht $r vollständig" nice -n 19 maldet -a "$r" >>"$RAW/maldet.txt" 2>&1
+        run_heartbeat "Linux Malware Detect durchsucht $r vollständig" nice -n 19 maldet -co "scan_workers=$mw" -a "$r" >>"$RAW/maldet.txt" 2>&1
       else
         log "   Linux Malware Detect durchsucht: $r (Dateien der letzten $days Tage)"
         run_heartbeat "Linux Malware Detect prüft in $r die Dateien der letzten $days Tage" \
-          nice -n 19 maldet -r "$r" "$days" >>"$RAW/maldet.txt" 2>&1
+          nice -n 19 maldet -co "scan_workers=$mw" -r "$r" "$days" >>"$RAW/maldet.txt" 2>&1
       fi
     done
     SUB_TEXT=""

@@ -9,6 +9,9 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   /var/tmp und /dev/shm, darunter die Zehntausenden Dateien, die Collabora Online in /tmp entpackt (Laufzeit über
   2 Stunden). Seit 1.5.13 wird jeder Ordner einzeln übergeben; jetzt lässt maldet außerdem /tmp aus (prüft ClamAV)
   und übernimmt die Ausnahmen des Virenscans (Nextcloud-Daten, Backups, Datenbanken …).
+- **Linux Malware Detect übernimmt die Einstellung „Parallele Prüfungen“** (dort höchstens 8 gleichzeitige Prüfungen;
+  „Automatisch“ überlässt die Wahl maldet: 2 je Prozessorkern, höchstens 8). Läuft der ClamAV-Dienst, nutzt maldet ihn
+  für seinen ClamAV-Teil ohnehin selbst.
 
 ## 1.5.13 – 2026-11-10
 

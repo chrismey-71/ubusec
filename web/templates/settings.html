@@ -197,7 +197,8 @@
         {% else %}Jeder clamscan-Prozess nutzt einen Prozessorkern und etwa 1,4 GB Arbeitsspeicher.{% endif %}
         Dieser Server: {{ conf._cpus or '?' }} Kerne, {{ conf._mem_gb or '?' }} GB Arbeitsspeicher{% if conf._swap_gb and conf._swap_gb != '0' %}, {{ conf._swap_gb }} GB Swap{% endif %}.
         {% if conf._mem_limit_gb %}Speichergrenze für Scans: {{ conf._mem_limit_gb }} GB – reicht für {{ conf._clam_fit }} clamscan-Prozess{{ 'e' if conf._clam_fit != 1 }}.{% endif %}
-        Scans weichen nie in den Swap aus und laufen mit niedrigster Priorität, Websites haben immer Vorrang.</small>
+        Scans weichen nie in den Swap aus und laufen mit niedrigster Priorität, Websites haben immer Vorrang.
+        Gilt auch für Linux Malware Detect (dort höchstens 8; „Automatisch“: 2 je Kern, höchstens 8).</small>
       {% set par = (conf.get('CLAM_PARALLEL', '0') or '0') | int %}
       <p class="field-warn" id="clam-parallel-warn" {% if via_clamd or par <= (conf._clam_fit or 1) %}hidden{% endif %}>
         Mehr clamscan-Prozesse, als in die Speichergrenze passen ({{ conf._clam_fit or 1 }}). Einzelne Prozesse werden dann vom System beendet und ihre Dateien einzeln nachgeholt – der Scan dauert dadurch länger statt kürzer.</p></label>
