@@ -659,22 +659,48 @@ mod_firewall() {
     active="ufw"
     grep -qE '^Default: (deny|reject) \(incoming\)' "$RAW/ufw.txt" || \
       add HOCH firewall "ufw: Eingehender Verkehr ist standardmäßig erlaubt" "Beheben: ufw default deny incoming"
-    if grep -qi '^IPV6=no' /etc/default/ufw 2>/dev/null && ip -6 addr show scope global 2>/dev/null | grep -q inet6; then
-      add MITTEL firewall "ufw filtert kein IPv6, obwohl der Server öffentliche IPv6-Adressen hat" "Beheben: IPV6=yes in /etc/default/ufw"
-    fi
   fi
-  for p in firewalld csf; do systemctl is-active -q "$p" 2>/dev/null && active+=" $p"; done
+  # Wer filtert IPv4, wer IPv6? (Webmins „Linux Firewall“ = nur iptables/IPv4, IPv6 braucht „Linux IPv6 Firewall“)
+  local v4=0 v6=0
+  if [ "$active" = ufw ]; then v4=1; grep -qi '^IPV6=no' /etc/default/ufw 2>/dev/null || v6=1; fi
+  systemctl is-active -q firewalld 2>/dev/null && { active+=" firewalld"; v4=1; v6=1; }
+  if systemctl is-active -q csf 2>/dev/null; then
+    active+=" csf"; v4=1; grep -qE '^IPV6 *= *"1"' /etc/csf/csf.conf 2>/dev/null && v6=1
+  fi
   if have nft && nft list ruleset >"$RAW/nft.txt" 2>/dev/null; then
-    grep -qE 'hook input .*policy drop' "$RAW/nft.txt" && active+=" nftables"
+    # je Tabelle: Eingangskette mit „policy drop“ oder abschließendem drop/reject
+    local fam
+    fam=$(awk '/^table /{f=$2} /hook input/{inp=1} inp && /policy drop/{print f; inp=0} /^\t}/{inp=0}' "$RAW/nft.txt" | sort -u | tr '\n' ' ')
+    [[ " $fam " == *" ip "* || " $fam " == *" inet "* ]] && v4=1
+    [[ " $fam " == *" ip6 "* || " $fam " == *" inet "* ]] && v6=1
+    [ -n "$fam" ] && active+=" nftables"
   fi
   if have iptables; then
     iptables -S >"$RAW/iptables.txt" 2>/dev/null
-    grep -qE '^-P INPUT (DROP|REJECT)' "$RAW/iptables.txt" && active+=" iptables"
+    if grep -qE '^-P INPUT (DROP|REJECT)' "$RAW/iptables.txt" || \
+       grep -E '^-A INPUT ' "$RAW/iptables.txt" | tail -1 | grep -qE -- '-j (DROP|REJECT)$'; then active+=" iptables"; v4=1; fi
   fi
-  if [ -z "$active" ]; then
-    add HOCH firewall "Keine aktive Firewall mit Standard-Blockierung erkannt" "Beheben z.B.: ufw allow OpenSSH && ufw enable"
+  if have ip6tables; then
+    ip6tables -S >"$RAW/ip6tables.txt" 2>/dev/null
+    if grep -qE '^-P INPUT (DROP|REJECT)' "$RAW/ip6tables.txt" || \
+       grep -E '^-A INPUT ' "$RAW/ip6tables.txt" | tail -1 | grep -qE -- '-j (DROP|REJECT)$'; then active+=" ip6tables"; v6=1; fi
+  fi
+  active=$(tr ' ' '\n' <<<"$active" | awk 'NF && !s[$0]++' | tr '\n' ' ')
+  # Hat der Server erreichbares IPv6? (globale Adresse und Standardroute)
+  local has6=0 ports6
+  ip -6 addr show scope global 2>/dev/null | grep -q 'inet6 [23]' && ip -6 route show default 2>/dev/null | grep -q . && has6=1
+  ports6=$(ss -H -ltnu 2>/dev/null | awk '$5 ~ /^(\[::\]|\*):/ {n=split($5,a,":"); print a[n]"/"$1}' | sort -t/ -k1,1n -u | tr '\n' ' ')
+  if [ -z "${active// /}" ]; then
+    local nd=("Beheben z.B.: ufw allow OpenSSH && ufw enable")
+    [ "$has6" = 1 ] && nd+=("Der Server hat auch IPv6 – die Firewall muss beide Protokolle abdecken (ufw und firewalld tun das von selbst)")
+    add HOCH firewall "Keine aktive Firewall mit Standard-Blockierung erkannt" "${nd[@]}"
   else
-    add INFO firewall "Aktive Firewall: ${active# }"
+    add INFO firewall "Aktive Firewall: ${active% }"
+    if [ "$has6" = 1 ] && [ "$v4" = 1 ] && [ "$v6" = 0 ]; then
+      add HOCH firewall "IPv6 wird nicht gefiltert – die Firewall gilt nur für IPv4" \
+        "Über die IPv6-Adresse sind alle Dienste ohne Firewall erreichbar: ${ports6:-?}" \
+        "IPv6-Adresse: $(ip -6 addr show scope global 2>/dev/null | awk '/inet6 [23]/{print $2; exit}')"
+    fi
   fi
 
   public_ports >"$RAW/ports.txt"

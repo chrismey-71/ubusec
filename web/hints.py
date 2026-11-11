@@ -290,9 +290,19 @@ _H = [
         why="Die Firewall ist an, lässt aber alles durch, was nicht ausdrücklich verboten ist.",
         steps=["Benötigte Ports erlauben (mindestens SSH), dann:", "$ sudo ufw default deny incoming"],
         effort="15 Min")),
-    (r"^firewall\|ufw filtert kein IPv6", dict(
-        why="Über IPv6 sind alle Dienste ungefiltert erreichbar.",
-        steps=["In /etc/default/ufw: IPV6=yes", "$ sudo ufw disable && sudo ufw enable"], effort="5 Min")),
+    (r"^firewall\|IPv6 wird nicht gefiltert", dict(
+        why="Die Firewall-Regeln gelten nur für IPv4. Über die IPv6-Adresse des Servers ist jeder Dienst ohne Filter "
+            "erreichbar – auch die, die für IPv4 gesperrt sind (z. B. Webmin). Typisch bei Webmins „Linux Firewall“: "
+            "Für IPv6 gibt es ein eigenes Modul „Linux IPv6 Firewall“. Mit dem AAAA-Eintrag im DNS ist die Adresse öffentlich.",
+        steps=["ufw: in /etc/default/ufw IPV6=yes setzen, dann sudo ufw disable && sudo ufw enable – fertig.",
+               "Sonst Webmin → Networking → Linux IPv6 Firewall dieselben Freigaben wie für IPv4 anlegen, dazu "
+               "„ICMPv6 erlauben“ (ohne ICMPv6 funktioniert IPv6 nicht) und „Activate at boot“.",
+               "Oder per Befehl (gibt nur SSH, HTTP und HTTPS frei – weitere Ports in --dports ergänzen):",
+               "$ sudo ip6tables-save | sudo tee /root/ip6tables-vorher.txt >/dev/null",
+               "$ sudo ip6tables -F INPUT && sudo ip6tables -A INPUT -i lo -j ACCEPT && sudo ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT && sudo ip6tables -A INPUT -p ipv6-icmp -j ACCEPT && sudo ip6tables -A INPUT -p tcp -m multiport --dports 22,80,443 -j ACCEPT && sudo ip6tables -P INPUT DROP",
+               "Dauerhaft speichern: sudo apt install iptables-persistent && sudo netfilter-persistent save",
+               "Zurück: sudo ip6tables -P INPUT ACCEPT && sudo ip6tables -F INPUT"],
+        effort="15 Min")),
     (r"^firewall\|Riskante Dienste lauschen öffentlich", dict(
         why="Diese Dienste sind nicht dafür gebaut, direkt aus dem Internet erreichbar zu sein, und werden laufend "
             "automatisiert gescannt. Was nicht von außen gebraucht wird, sollte nur lokal lauschen oder abgeschaltet sein.",

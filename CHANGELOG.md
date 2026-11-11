@@ -4,6 +4,10 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.5.16 – 2026-11-11
 
+- **Firewall: ungefiltertes IPv6 wird erkannt.** Hat der Server eine erreichbare IPv6-Adresse, prüft ubusec, ob die
+  Firewall auch IPv6 abdeckt (ufw, firewalld, csf, nftables, ip6tables). Gelten die Regeln nur für IPv4 – typisch bei
+  Webmins „Linux Firewall“ –, meldet ubusec HOCH samt den über IPv6 offenen Ports und einer Anleitung. Außerdem
+  erkennt die Prüfung jetzt auch iptables-Regelsätze mit Standard „ACCEPT“ und abschließender DROP-Regel.
 - **AIDE liest große Videos nicht mehr jedes Mal komplett:** Für Video- und Audiodateien (mp4, mov, mkv, webm, mp3,
   wav …) in /home, /var/www und /srv prüft AIDE nur noch Größe, Zeitstempel, Besitzer und Rechte, keine Prüfsumme.
   Ein Upload-Ordner mit Videos kostete sonst bei jedem Vollscan Gigabytes an Lesezugriffen. PHP, JavaScript und
