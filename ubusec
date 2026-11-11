@@ -735,14 +735,22 @@ mod_integrity() {
     elif [ -f "$db" ] && [ "$MODE" != full ] && [ "${AIDE_QUICK:-0}" != 1 ]; then
       add INFO integrity "AIDE prüft beim Vollscan (dauert auf großen Servern länger; für den Schnellscan: AIDE_QUICK=1)"
     elif [ -f "$db" ]; then
+      aide_excludes
       run_heartbeat "AIDE vergleicht die Systemdateien mit dem gespeicherten Stand" \
         aide --config=/etc/aide/aide.conf --check >"$RAW/aide.txt" 2>&1; rc=$?; SUB_TEXT=""
       if (( rc >= 1 && rc <= 7 )); then
         # Liste einordnen: was erklären Paket-Updates seit dem AIDE-Stand, was bleibt übrig – zusammengefasst je Ordner
-        python3 -I - "$RAW/aide.txt" "$db" >"$RAW/aide-summary.txt" 2>/dev/null <<'PYA'
+        python3 -I - "$RAW/aide.txt" "$db" /etc/aide/aide.conf.d/99_ubusec_excludes >"$RAW/aide-summary.txt" 2>/dev/null <<'PYA'
 import os, re, sys, glob, collections
-txt, db = sys.argv[1], sys.argv[2]
+txt, db, rules = sys.argv[1], sys.argv[2], sys.argv[3]
 since = os.path.getmtime(db)
+# Regeln nach dem AIDE-Stand geändert (z. B. Mediendateien ohne Prüfsumme): diese Dateien erscheinen einmalig als
+# „geändert“, weil sich nur die geprüften Merkmale unterscheiden
+try:
+    newrules = os.path.getmtime(rules) > since
+except OSError:
+    newrules = False
+MEDIA = re.compile(r"^/(home|var/www|srv)/.*\.(mp4|m4v|mov|mkv|avi|webm|wmv|flv|mpe?g|m2ts|mts|3gp|mp3|m4a|wav|flac|ogg|oga|opus|aac|wma|iso)$", re.I)
 add, rem, chg = [], [], []
 for l in open(txt, errors="replace"):
     m = re.match(r"^([a-zA-Z])([^:]{10,}):\s(/.*)$", l.rstrip("\n"))
@@ -774,6 +782,9 @@ def bucket(p):
     return "/".join(parts[:3]) if len(parts) > 3 else p
 out = []
 total = len(add) + len(rem) + len(chg)
+media = [p for p in chg if newrules and MEDIA.match(p)] if newrules else []
+ms = set(media)
+add, rem, chg = add, rem, [p for p in chg if p not in ms]
 expl = [p for p in add + rem + chg if p in owned or os.path.dirname(p) in owned]
 noise = [p for p in add + rem + chg if p not in owned and NOISE.match(p)]
 rest = [p for p in add + rem + chg if p not in owned and os.path.dirname(p) not in owned and not NOISE.match(p)]
@@ -781,6 +792,9 @@ out.append("Neu %d · entfernt %d · geändert %d (insgesamt %d)" % (len(add), l
 if expl:
     out.append("%d davon durch Paket-Updates seit dem AIDE-Stand erklärt (%s%s)" % (
         len(expl), ", ".join(sorted(pk)[:6]), " …" if len(pk) > 6 else ""))
+if media:
+    out.append("%d Mediendateien nur wegen der neuen AIDE-Regel (Videos/Audio ohne Prüfsumme) – einmalig, verschwindet "
+               "nach „Baseline übernehmen“" % len(media))
 if noise:
     out.append("%d in Protokoll-, Cache- und Arbeitsordnern (/var/log, /var/cache, /var/lib/apt …) – normal" % len(noise))
 if rest:
@@ -2131,6 +2145,7 @@ tools_state() { # tools_state true|false aktion [ok|failed]  – das Ergebnis ze
 # ---------------------------------------------------------------- optionale Werkzeuge ---
 # AIDE: Dateiintegrität für das ganze System (auch Konfigurationen und Programme außerhalb von Paketen).
 # Große, sich ständig ändernde Datenordner werden ausgenommen, damit Datenbank und Prüfung überschaubar bleiben.
+AIDE_MEDIA_RX='(?i:mp4|m4v|mov|mkv|avi|webm|wmv|flv|mpe?g|m2ts|mts|3gp|mp3|m4a|wav|flac|ogg|oga|opus|aac|wma|iso)'
 aide_excludes() {
   local d f=/etc/aide/aide.conf.d/99_ubusec_excludes
   [ -d /etc/aide/aide.conf.d ] || return 0
@@ -2142,13 +2157,28 @@ aide_excludes() {
     echo '!/home/[^/]+/domains/[^/]+/(logs|tmp)(/|$)'
     nextcloud_datadirs | sed 's/^/!/'
     backup_dirs | sed 's/^/!/'
+    echo "# große Mediendateien: nur Größe, Zeitstempel, Besitzer und Rechte prüfen – keine Prüfsumme"
+    echo "# (AIDE müsste sonst bei jeder Prüfung jedes Video komplett lesen; PHP, JS und .htaccess bleiben voll geprüft)"
+    for d in /home /var/www /srv; do echo "$d/.*\\.$AIDE_MEDIA_RX\$ f p+i+n+u+g+s+m+c"; done
   } >"$f.tmp"
-  chmod 644 "$f.tmp"; mv -f "$f.tmp" "$f"
+  chmod 644 "$f.tmp"
+  # nur bei geänderten Regeln ersetzen – das Datum der Datei zeigt, seit wann die Regeln gelten
+  if cmp -s "$f.tmp" "$f"; then rm -f "$f.tmp"; return 0; fi
+  local old=""; [ -f "$f" ] && old=$(mktemp) && cp -p "$f" "$old"
+  mv -f "$f.tmp" "$f"
+  # Versteht diese AIDE-Version die Medien-Regel nicht, ohne sie schreiben (lieber langsam als gar nicht prüfen)
+  if have aide && ! aide --config=/etc/aide/aide.conf --config-check >/dev/null 2>&1; then
+    grep -v ' f p+i+n+u+g+s+m+c$' "$f" >"$f.tmp" && chmod 644 "$f.tmp" && mv -f "$f.tmp" "$f"
+    if ! aide --config=/etc/aide/aide.conf --config-check >/dev/null 2>&1 && [ -n "$old" ]; then cp -p "$old" "$f"; fi
+  fi
+  [ -n "$old" ] && rm -f "$old"
+  return 0
 }
 aide_aktiv() { [ -f "$STATE_DIR/aide-init.running" ] && kill -0 "$(cat "$STATE_DIR/aide-init.running" 2>/dev/null)" 2>/dev/null; }
 aide_init_bg() { # Datenbank im Hintergrund anlegen (kann auf großen Servern lange dauern)
   # Fortschritt für die Weboberfläche: $STATE_DIR/aide-init.json (running → ok|failed), Protokoll: $LOG_DIR/aide-init.log
   if aide_aktiv; then echo "AIDE legt die Datenbank bereits an."; return 0; fi
+  aide_excludes
   local j=$STATE_DIR/aide-init.json g; g=$(grp)
   local cmd="t0=\$(date +%s); printf '{\"state\":\"running\",\"started\":%s}' \$t0 >$j; chgrp $g $j; chmod 640 $j
     aideinit -y -f >$LOG_DIR/aide-init.log 2>&1; rc=\$?

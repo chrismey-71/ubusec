@@ -30,7 +30,9 @@
 {% elif aide.state == 'ok' %}
 <p class="flash flash-ok">✓ <b>AIDE ist eingerichtet:</b> Datenbank {{ aide.finished | ago }} in {{ aide.minutes }} Min. angelegt
   ({{ '%.1f' | format(aide.db_bytes / 1048576) }} MB). Ab dem nächsten Vollscan meldet ubusec jede Änderung an Systemdateien seit
-  diesem Stand. Nach Updates oder gewollten Änderungen im Befund „Baseline übernehmen“.</p>
+  diesem Stand. Nach Updates oder gewollten Änderungen im Befund „Baseline übernehmen“.<br>
+  <span class="small">Videos und Audiodateien in /home, /var/www und /srv prüft AIDE nur auf Größe, Zeitstempel, Besitzer und Rechte –
+  ohne sie jedes Mal komplett zu lesen. PHP-, JavaScript- und .htaccess-Dateien werden weiter vollständig geprüft.</span></p>
 {% elif aide.state in ('failed', 'aborted') %}
 <div class="flash flash-error">
   ✗ <b>Die AIDE-Datenbank konnte nicht angelegt werden</b>{% if aide.state == 'aborted' %} – der Vorgang wurde abgebrochen (z. B. durch einen Neustart oder zu wenig Arbeitsspeicher){% endif %}.
