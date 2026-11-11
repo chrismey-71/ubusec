@@ -4,6 +4,23 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.5.15 – 2026-11-11
 
+- **Neuer Prüfbereich „E-Mail“** (läuft bei Schnell- und Vollscan mit, einzeln über „Ausgewählte Bereiche“):
+  - offenes Relay und zu weit gefasstes `mynetworks`,
+  - Verschlüsselung bei Empfang und Versand, Anmeldung nur verschlüsselt, Postfix-Zertifikat (Ablauf, passender
+    Name), Dovecot ohne SSL oder mit Klartext-Passwörtern,
+  - Spamfilter aktiv und für jede Domain mit Postfächern eingeschaltet (Virtualmin),
+  - Greylisting: postgrey läuft, ist aber nicht in Postfix eingebunden – mit Knopf „Korrigieren“ (hängt
+    `check_policy_service` an, prüft mit `postfix check`, rückgängig machbar),
+  - Sperrlisten: keine eingetragen, Eintrag ohne Ergebnisfilter, und ob Spamhaus dem Server überhaupt antwortet
+    (über öffentliche Resolver kommt nur 127.255.255.254 – die Liste filtert dann nichts; ohne Filter würden sogar
+    alle Mails abgelehnt), mit Anleitung für den eigenen Resolver über BIND,
+  - HELO- und Absenderprüfungen, DKIM-Schlüssel im DNS, Reverse-DNS der Server-IP,
+  - Server-IP auf Spamhaus, SpamCop oder PSBL,
+  - volle Warteschlange mit den häufigsten Absendern (Hinweis auf gekaperte Postfächer),
+  - fail2ban ohne Schutz für die Mail-Anmeldung.
+- **DNSSEC-Fehler werden erkannt** (Bereich „Websites & Domains“): Liefert ein öffentlicher Resolver SERVFAIL,
+  ohne DNSSEC-Prüfung aber eine Antwort, passt der DS-Eintrag bei der Registry nicht – die Domain ist dann für viele
+  Besucher und Mailserver nicht erreichbar, für andere schon.
 - **AIDE und Linux Malware Detect zeigen, wo sie gerade sind:** Während der Prüfung steht in der Weboberfläche neben
   der Laufzeit der Ordner, den das Werkzeug gerade liest („– gerade: /home/…/wp-content/plugins/…“), aktualisiert
   alle 10 Sekunden.

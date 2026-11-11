@@ -5,6 +5,7 @@ Wird von ubusec (als root) aufgerufen:
     webcheck.py sites  --raw DIR --mode quick|full
     webcheck.py apps   --raw DIR --mode quick|full
     webcheck.py tools  --raw DIR --mode quick|full   (Aktualität der Werkzeuge, JSON nach $TOOLS_JSON)
+    webcheck.py mail   --raw DIR --mode quick|full   (Postfix/Dovecot, Spamschutz, Ruf der Server-IP)
     webcheck.py nc-datadirs        (Datenordner der Nextcloud-Installationen)
 
 Ausgabe: eine Zeile pro Befund  SCHWERE<TAB>MELDUNG<TAB>DETAIL1\\x1fDETAIL2…
@@ -21,6 +22,7 @@ import datetime
 import fnmatch
 import glob
 import http.client
+import ipaddress
 import json
 import os
 import pwd
@@ -525,6 +527,38 @@ def dig(name, rtype):
     return lines
 
 
+def dig_status(name, rtype, server=None, cd=False):
+    """(Status, Antworten) einer DNS-Abfrage, z. B. ("NOERROR", [...]) oder ("SERVFAIL", [])."""
+    cmd = ["dig", "+time=3", "+tries=2", "+noall", "+comments", "+answer", rtype, name]
+    if server:
+        cmd.insert(1, "@" + server)
+    if cd:
+        cmd.insert(1, "+cd")
+    rc, out, _ = run(cmd, timeout=25)
+    m = re.search(r"status: (\w+)", out)
+    ans = [l for l in out.splitlines() if l.strip() and not l.startswith(";")]
+    return (m.group(1) if m else ("TIMEOUT" if rc else "?")), ans
+
+
+def check_public_resolution(apex):
+    """Ist die Zone über öffentliche Resolver auflösbar? Erkennt kaputtes DNSSEC (DS beim Registry passt nicht)."""
+    for srv in ("1.1.1.1", "8.8.8.8"):
+        st, _ = dig_status(apex, "SOA", srv)
+        if st == "NOERROR":
+            return
+        if st == "SERVFAIL":
+            st_cd, ans_cd = dig_status(apex, "SOA", srv, cd=True)
+            if st_cd == "NOERROR" and ans_cd:
+                ds = dig(apex, "DS")
+                agg("HOCH", "DNSSEC-Fehler – Domain ist für viele Besucher und Mailserver nicht erreichbar ({domains})",
+                    "%s – %s meldet SERVFAIL, ohne DNSSEC-Prüfung (+cd) kommt eine Antwort%s"
+                    % (apex, srv, "; DS bei der Registry: " + ds[0][:60] if ds else ""))
+            else:
+                agg("HOCH", "Domain über öffentliche DNS-Resolver nicht auflösbar ({domains})", "%s – %s meldet %s" % (apex, srv, st))
+            return
+    # Zeitüberschreitung bei beiden: Netz des Servers blockiert vermutlich ausgehendes DNS – nichts melden
+
+
 def zone_apex(name):
     parts = name.split(".")
     for i in range(len(parts) - 1):
@@ -577,6 +611,7 @@ def check_dns(domains):
             agg("INFO", "DNS-Prüfung übersprungen für Hostnamen des Server-Anbieters ({domains})",
                 "%s – SPF, DMARC und CAA verwaltet der Anbieter" % ", ".join(apexes[apex]))
             continue
+        check_public_resolution(apex)
         mx = dig(apex, "MX")
         txt = dig(apex, "TXT")
         spf = [t for t in txt if t.lower().startswith("v=spf1")]
@@ -1475,11 +1510,333 @@ def nc_datadirs():
         print(d)
 
 
+
+# ======================================================================= Mail ===
+# Prüft den Mailserver (Postfix, Dovecot, Spamfilter, Sperrlisten, Ruf des Servers). Nur lesend.
+SPAMHAUS_BLOCKED = {"127.255.255.252", "127.255.255.254", "127.255.255.255"}
+
+
+def postconf_all():
+    rc, out, _ = run(["postconf"], timeout=30)
+    conf = {}
+    for l in out.splitlines():
+        k, _, v = l.partition(" = ")
+        conf[k.strip()] = v.strip()
+    return conf if rc == 0 else None
+
+
+def svc_active(*names):
+    for n in names:
+        if run(["systemctl", "is-active", "--quiet", n], timeout=10)[0] == 0:
+            return n
+    return ""
+
+
+def restr(conf, key):
+    return [x.strip() for x in re.split(r"[,\s]+", conf.get(key, "")) if x.strip()]
+
+
+def public_ips():
+    rc, out, _ = run(["hostname", "-I"], timeout=10)
+    ips = []
+    for ip in out.split():
+        if ":" in ip:
+            if ip.lower().startswith(("fe80", "fd", "fc", "::1")):
+                continue
+        elif re.match(r"^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)", ip):
+            continue
+        ips.append(ip)
+    return ips
+
+
+def dnsbl_lookup(ip, zone):
+    """Einträge einer Sperrliste für eine IPv4-Adresse (leere Liste = nicht gelistet)."""
+    rev = ".".join(reversed(ip.split(".")))
+    return dig("%s.%s" % (rev, zone), "A")
+
+
+def cert_days(path):
+    rc, out, _ = run(["openssl", "x509", "-noout", "-enddate", "-in", path], timeout=10)
+    m = re.search(r"notAfter=(.+)", out)
+    if rc != 0 or not m:
+        return None
+    try:
+        end = datetime.datetime.strptime(m.group(1).strip(), "%b %d %H:%M:%S %Y %Z")
+        return (end - datetime.datetime.utcnow()).days
+    except ValueError:
+        return None
+
+
+_MAILDOM = []
+
+
+def mail_domains():
+    if not _MAILDOM:
+        _MAILDOM.append(_mail_domains())
+    return _MAILDOM[0]
+
+
+def _mail_domains():
+    """(Domains mit Mail, davon mit Spamfilter) laut Virtualmin – oder (None, None)."""
+    if not shutil_which("virtualmin"):
+        return None, None
+    def names(*args):
+        rc, out, _ = run(["virtualmin", "list-domains", "--name-only"] + list(args), timeout=90)
+        return [l.strip().lower() for l in out.splitlines() if l.strip()] if rc == 0 else None
+    return names("--with-feature", "mail"), names("--with-feature", "spam")
+
+
+def check_open_relay(conf):
+    rel = restr(conf, "smtpd_relay_restrictions")
+    rcpt = restr(conf, "smtpd_recipient_restrictions")
+    guard = {"reject_unauth_destination", "defer_unauth_destination"}
+
+    def guarded(lst):
+        for x in lst:
+            if x in guard:
+                return True
+            if x in ("permit", "permit_auth_destination") or (x.startswith("permit") and x not in (
+                    "permit_mynetworks", "permit_sasl_authenticated", "permit_tls_clientcerts", "permit_tls_all_clientcerts")):
+                return False
+        return False
+    if not (guarded(rel) or guarded(rcpt)):
+        add("KRITISCH", "Server könnte als offenes Relay missbraucht werden",
+            "Weder smtpd_relay_restrictions noch smtpd_recipient_restrictions enthalten reject_unauth_destination",
+            "smtpd_relay_restrictions = %s" % (conf.get("smtpd_relay_restrictions") or "(leer)"))
+    nets = conf.get("mynetworks", "")
+    wide = []
+    for n in re.split(r"[,\s]+", nets):
+        try:
+            net = ipaddress.ip_network(n.strip("[]").replace("]/", "/"), strict=False)
+        except ValueError:
+            continue
+        if net.prefixlen == 0 or (net.is_global and net.prefixlen < (24 if net.version == 4 else 56)):
+            wide.append(n)
+    if wide:
+        add("HOCH", "mynetworks erlaubt sehr großen Netzen das Versenden ohne Anmeldung",
+            "mynetworks = %s" % nets, "Üblich: 127.0.0.0/8 [::1]/128 (nur der Server selbst)")
+
+
+def check_tls(conf):
+    lvl = conf.get("smtpd_tls_security_level") or ("may" if conf.get("smtpd_use_tls") == "yes" else "")
+    if lvl not in ("may", "encrypt"):
+        add("MITTEL", "Empfang ohne Verschlüsselung (STARTTLS nicht angeboten)",
+            "smtpd_tls_security_level = %s" % (lvl or "(nicht gesetzt)"))
+    if conf.get("smtp_tls_security_level", "") not in ("may", "encrypt", "dane", "verify", "secure"):
+        add("NIEDRIG", "Versand an andere Server unverschlüsselt (smtp_tls_security_level)",
+            "smtp_tls_security_level = %s" % (conf.get("smtp_tls_security_level") or "(nicht gesetzt)"))
+    if conf.get("smtpd_tls_auth_only", "no") != "yes":
+        add("MITTEL", "Anmeldung (SMTP-AUTH) auch ohne Verschlüsselung erlaubt",
+            "smtpd_tls_auth_only = %s" % conf.get("smtpd_tls_auth_only", "no"))
+    cert = conf.get("smtpd_tls_cert_file") or ""
+    if not cert:
+        chain = conf.get("smtpd_tls_chain_files", "")
+        cert = re.split(r"[,\s]+", chain)[-1] if chain else ""
+    if cert and os.path.isfile(cert):
+        d = cert_days(cert)
+        if d is not None and d < 0:
+            add("HOCH", "TLS-Zertifikat von Postfix ist abgelaufen", "%s (seit %d Tagen)" % (cert, -d))
+        elif d is not None and d < 14:
+            add("MITTEL", "TLS-Zertifikat von Postfix läuft bald ab", "%s (noch %d Tage)" % (cert, d))
+        rc, out, _ = run(["openssl", "x509", "-noout", "-ext", "subjectAltName", "-subject", "-in", cert], timeout=10)
+        host = conf.get("myhostname", "")
+        names = set(re.findall(r"DNS:([^,\s]+)", out)) | set(re.findall(r"CN\s*=\s*([^,/\s]+)", out))
+        if host and names and not any(n == host or (n.startswith("*.") and host.endswith(n[1:])) for n in names):
+            add("NIEDRIG", "TLS-Zertifikat von Postfix passt nicht zum Servernamen",
+                "myhostname = %s" % host, "Zertifikat gilt für: %s" % ", ".join(sorted(names)[:6]))
+    if shutil_which("doveconf"):
+        ssl_ = run(["doveconf", "-h", "ssl"], timeout=15)[1].strip()
+        plain = run(["doveconf", "-h", "auth_allow_cleartext"], timeout=15)
+        if plain[0] == 0 and plain[1].strip():
+            clear_ok = plain[1].strip() == "yes"
+        else:
+            clear_ok = run(["doveconf", "-h", "disable_plaintext_auth"], timeout=15)[1].strip() == "no"
+        if ssl_ == "no":
+            add("HOCH", "Dovecot (IMAP/POP3) ohne Verschlüsselung", "ssl = no")
+        elif clear_ok and ssl_ != "required":
+            add("MITTEL", "Dovecot erlaubt Passwörter ohne Verschlüsselung",
+                "auth_allow_cleartext = yes bzw. disable_plaintext_auth = no")
+
+
+def check_spam(conf):
+    filt = []
+    if svc_active("spamd", "spamassassin"):
+        filt.append("SpamAssassin")
+    if svc_active("rspamd"):
+        filt.append("Rspamd")
+    if svc_active("amavis", "amavisd-new"):
+        filt.append("Amavis")
+    maild, spamd = mail_domains()
+    if maild is not None:
+        missing = sorted(set(maild) - set(spamd or []))
+        if not filt and maild:
+            add("MITTEL", "Kein Spamfilter aktiv", "Domains mit Mail: %s" % ", ".join(maild[:10]))
+        elif missing:
+            add("MITTEL", "Spamfilter nicht für alle Domains mit Postfächern eingeschaltet",
+                *["%s – ohne Spamfilter" % d for d in missing[:15]])
+    elif not filt:
+        add("MITTEL", "Kein Spamfilter gefunden (SpamAssassin, Rspamd oder Amavis)")
+    # Greylisting
+    rcpt = restr(conf, "smtpd_recipient_restrictions")
+    pol = [x for i, x in enumerate(rcpt) if x.startswith("inet:") and i and rcpt[i - 1] == "check_policy_service"]
+    grey = svc_active("postgrey")
+    if grey and not pol:
+        port = re.search(r"--inet=(?:[\d.]+:)?(\d+)", read("/etc/default/postgrey") or "")
+        add("NIEDRIG", "Greylisting (postgrey) läuft, ist aber nicht in Postfix eingebunden",
+            "In smtpd_recipient_restrictions fehlt: check_policy_service inet:127.0.0.1:%s" % (port.group(1) if port else "10023"),
+            "Virtualmin: Email Settings → Greylisting einschalten")
+    elif not grey and not pol and not svc_active("rspamd"):
+        add("INFO", "Kein Greylisting – fängt einen großen Teil des Massen-Spams ab",
+            "Virtualmin: Email Settings → Greylisting; sonst: apt install postgrey")
+
+
+def check_dnsbl(conf):
+    rcpt = conf.get("smtpd_recipient_restrictions", "") + " " + conf.get("smtpd_client_restrictions", "")
+    rbls = re.findall(r"reject_rbl_client\s+(\S+)", rcpt)
+    ps = conf.get("postscreen_dnsbl_sites", "")
+    if not rbls and not ps:
+        add("NIEDRIG", "Keine Sperrliste (DNSBL) – bekannte Spam-Server werden nicht abgewiesen",
+            "Empfehlung: reject_rbl_client zen.spamhaus.org=127.0.0.[2..11] in smtpd_recipient_restrictions",
+            "Vorher prüfen, ob Spamhaus antwortet: dig +short 2.0.0.127.zen.spamhaus.org")
+    probe = dig("2.0.0.127.zen.spamhaus.org", "A")
+    blocked = bool(set(probe) & SPAMHAUS_BLOCKED)
+    for r in rbls:
+        if "=" not in r and not (blocked and "spamhaus" in r.lower()):
+            add("MITTEL", "Sperrliste ohne Ergebnisfilter – Fehlerantworten würden als Treffer zählen",
+                "reject_rbl_client %s" % r, "Besser: reject_rbl_client %s=127.0.0.[2..11]" % r)
+    uses_sh = "spamhaus" in (rcpt + ps).lower()
+    unfiltered = [r for r in rbls if "spamhaus" in r.lower() and "=" not in r]
+    if blocked and unfiltered:
+        add("KRITISCH", "Spamhaus antwortet mit Fehlercode und die Sperrliste hat keinen Filter – eingehende Mails werden abgelehnt",
+            "dig 2.0.0.127.zen.spamhaus.org → %s" % ", ".join(probe),
+            "Sofort: =127.0.0.[2..11] an reject_rbl_client %s anhängen oder die Zeile entfernen" % unfiltered[0])
+    elif uses_sh and blocked:
+        add("HOCH", "Spamhaus beantwortet keine Abfragen dieses Servers – Sperrliste wirkungslos",
+            "dig 2.0.0.127.zen.spamhaus.org → %s (Abfrage über öffentlichen DNS-Resolver)" % ", ".join(probe),
+            "Lösung: eigener Resolver (BIND/Unbound) für den Server, siehe Hinweis")
+    return not blocked and bool(probe)
+
+
+def check_reputation(conf, sh_ok):
+    host = conf.get("myhostname", "")
+    for ip in public_ips():
+        if ":" in ip:
+            continue
+        ptr = [p.rstrip(".") for p in dig(".".join(reversed(ip.split("."))) + ".in-addr.arpa", "PTR")]
+        if not ptr:
+            add("MITTEL", "Kein Reverse-DNS-Eintrag (PTR) für die Server-IP – Mails landen oft im Spam",
+                "%s hat keinen PTR-Eintrag" % ip, "Beim Server-Anbieter im Kundenbereich auf %s setzen" % (host or "den Servernamen"))
+        else:
+            fwd = dig(ptr[0], "A")
+            if ip not in fwd:
+                add("NIEDRIG", "Reverse-DNS passt nicht in beide Richtungen (PTR ↔ A)",
+                    "%s → %s → %s" % (ip, ptr[0], ", ".join(fwd) or "keine Adresse"))
+            elif host and ptr[0].lower() != host.lower():
+                add("NIEDRIG", "Reverse-DNS und Servername von Postfix unterscheiden sich",
+                    "PTR %s = %s, myhostname = %s" % (ip, ptr[0], host))
+        listed = []
+        if sh_ok:
+            r = [x for x in dnsbl_lookup(ip, "zen.spamhaus.org") if x.startswith("127.0.0.")]
+            if r:
+                listed.append("Spamhaus ZEN (%s)" % ", ".join(r))
+        for zone, name in (("bl.spamcop.net", "SpamCop"), ("psbl.surriel.com", "PSBL")):
+            r = [x for x in dnsbl_lookup(ip, zone) if x.startswith("127.0.0.")]
+            if r:
+                listed.append(name)
+        if listed:
+            add("HOCH", "Server-IP steht auf Sperrlisten – andere Server lehnen Mails ab",
+                "%s: %s" % (ip, ", ".join(listed)),
+                "Ursache suchen (Warteschlange, gekaperte Postfächer, Kontaktformulare), dann bei der Liste austragen lassen")
+
+
+def check_queue():
+    rc, out, _ = run(["postqueue", "-j"], timeout=60)
+    if rc != 0:
+        return
+    n, senders = 0, {}
+    for l in out.splitlines():
+        try:
+            j = json.loads(l)
+        except ValueError:
+            continue
+        n += 1
+        s = j.get("sender") or "(leer)"
+        senders[s] = senders.get(s, 0) + 1
+    if n >= 100:
+        top = sorted(senders.items(), key=lambda kv: -kv[1])[:5]
+        add("HOCH" if n >= 1000 else "MITTEL",
+            "%d Mails in der Warteschlange – möglicherweise Spam-Versand über ein gekapertes Postfach" % n,
+            *["%s: %d" % kv for kv in top], "Ansehen: mailq | head -40")
+
+
+def check_helo(conf):
+    rcpt = restr(conf, "smtpd_recipient_restrictions") + restr(conf, "smtpd_helo_restrictions") + \
+        restr(conf, "smtpd_sender_restrictions") + restr(conf, "smtpd_client_restrictions")
+    want = ["reject_unknown_sender_domain", "reject_non_fqdn_sender", "reject_invalid_helo_hostname"]
+    miss = [w for w in want if w not in rcpt]
+    if len(miss) == len(want):
+        add("NIEDRIG", "Keine Prüfung von Absenderdomain und HELO beim Empfang",
+            "Fehlt: " + ", ".join(miss), "smtpd_helo_required = %s" % conf.get("smtpd_helo_required", "no"))
+
+
+def check_dkim(conf, domains):
+    milters = conf.get("smtpd_milters", "") + conf.get("non_smtpd_milters", "")
+    if not milters.strip() and not svc_active("rspamd"):
+        add("NIEDRIG", "Keine DKIM-Signatur für ausgehende Mails",
+            "Virtualmin: Email Settings → DomainKeys Identified Mail einschalten")
+        return
+    oc = read("/etc/opendkim.conf") or ""
+    sel = re.search(r"(?m)^\s*Selector\s+(\S+)", oc)
+    if not sel or not domains:
+        return
+    sel = sel.group(1)
+    dom = re.search(r"(?m)^\s*Domain\s+(\S+)", oc)
+    signed = [d.strip().lower() for d in dom.group(1).split(",")] if dom else []
+    if dom and dom.group(1).startswith("/"):
+        signed = [l.split()[0].lower() for l in (read(dom.group(1)) or "").splitlines() if l.strip() and not l.startswith("#")]
+    for d in sorted(set(domains)):
+        if signed and d not in signed:
+            continue
+        if not any("v=dkim1" in t.lower() or "p=" in t for t in dig("%s._domainkey.%s" % (sel, d), "TXT")):
+            agg("MITTEL", "DKIM-Schlüssel fehlt im DNS ({domains})",
+                "%s – TXT-Eintrag %s._domainkey.%s anlegen (Wert: Virtualmin → Email Settings → DKIM)" % (d, sel, d))
+
+
+def check_fail2ban_mail():
+    if not shutil_which("fail2ban-client"):
+        return
+    rc, out, _ = run(["fail2ban-client", "status"], timeout=20)
+    jails = out.lower()
+    if rc == 0 and not any(j in jails for j in ("postfix-sasl", "postfix", "dovecot", "sasl")):
+        add("NIEDRIG", "fail2ban schützt die Mail-Anmeldung nicht (keine postfix-sasl/dovecot-Jail)",
+            "Rateversuche auf Postfach-Passwörter werden nicht gebremst")
+
+
+def mod_mail(raw, full):
+    conf = postconf_all() if shutil_which("postconf") else None
+    if conf is None:
+        add("INFO", "Kein Postfix gefunden – Mailprüfung übersprungen")
+        return
+    if not shutil_which("dig"):
+        add("NIEDRIG", "dig fehlt – DNS-Teile der Mailprüfung übersprungen", "Installieren: apt install bind9-dnsutils")
+    check_open_relay(conf)
+    check_tls(conf)
+    check_spam(conf)
+    sh_ok = check_dnsbl(conf) if shutil_which("dig") else False
+    check_helo(conf)
+    maild, _ = mail_domains()
+    if shutil_which("dig"):
+        check_dkim(conf, maild or [])
+        check_reputation(conf, sh_ok)
+    check_queue()
+    check_fail2ban_mail()
+
+
 def main():
     if len(sys.argv) >= 2 and sys.argv[1] == "nc-datadirs":
         nc_datadirs()
         return
-    if len(sys.argv) < 2 or sys.argv[1] not in ("sites", "apps", "tools"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("sites", "apps", "tools", "mail"):
         sys.exit(__doc__)
     raw = "/tmp"
     full = False
@@ -1492,7 +1849,7 @@ def main():
     os.environ.setdefault("RAW", raw)
     socket.setdefaulttimeout(TIMEOUT + 2)
     try:
-        {"sites": mod_sites, "apps": mod_apps, "tools": mod_tools}[sys.argv[1]](raw, full)
+        {"sites": mod_sites, "apps": mod_apps, "tools": mod_tools, "mail": mod_mail}[sys.argv[1]](raw, full)
     except Exception as e:  # noqa: BLE001
         import traceback
         traceback.print_exc(file=sys.stderr)

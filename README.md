@@ -29,6 +29,7 @@ OpenSCAP u. a.) mit eigenen Prüfungen – auf der Kommandozeile, als Text/HTML/
 | Web | Webshells, PHP in Upload-Ordnern | eigene Signaturen, optional Linux Malware Detect |
 | **Websites & Domains** | alle Domains aus Virtualmin: HTTPS und Zertifikatsablauf, alte TLS-Versionen, Weiterleitung auf HTTPS, Sicherheits-Header (HSTS, CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy), Versionsangaben, offene Dateien (`.git`, `.env`, Backups, Datenbank-Dumps, phpinfo, Source-Maps), Verzeichnislisten, SPF, DMARC, CAA, Apache-Einstellungen | eigene Prüfungen, dig, optional testssl.sh |
 | **Webanwendungen** | WordPress (Version, Plugins, Themes, Debug, Datei-Editor, xmlrpc, Benutzer-Auslesen, Upload-Ordner), Nextcloud (Version/Support, Updates, Datenverzeichnis), Mautic, Roundcube (Sicherheitsupdates, Installer, Protokolle), eigene PHP-Apps (MySQL-root, SQL-Injection- und XSS-Muster, Backups im Webordner), PHP-Versionen und php.ini, MySQL/MariaDB-Konten | eigene Prüfungen, wordpress.org, endoflife.date, GitHub, optional WPScan |
+| **E-Mail** | Postfix und Dovecot: offenes Relay, Verschlüsselung und Zertifikat, Anmeldung nur verschlüsselt, Spamfilter je Domain, Greylisting, Sperrlisten (inkl. Test, ob Spamhaus überhaupt antwortet), HELO-/Absenderprüfung, DKIM-Schlüssel im DNS, Reverse-DNS, Server-IP auf Sperrlisten, volle Warteschlange, fail2ban für die Mail-Anmeldung | postconf, doveconf, dig, Virtualmin |
 
 ## Installation
 

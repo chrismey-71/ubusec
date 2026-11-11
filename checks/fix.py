@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -363,6 +364,46 @@ def do_postfix_banner(target, fdir, changes):
                                                        "disable_vrfy_command = yes"]
 
 
+def postgrey_port():
+    m = re.search(r"--inet=(?:([\d.]+):)?(\d+)", read("/etc/default/postgrey"))
+    return (m.group(1) or "127.0.0.1", m.group(2)) if m else ("127.0.0.1", "10023")
+
+
+def do_postfix_greylist(target, fdir, changes):
+    if target != "postfix" or not shutil.which("postconf"):
+        raise Refuse("Postfix nicht gefunden")
+    if run(["systemctl", "is-active", "--quiet", "postgrey"], 10)[0] != 0:
+        raise Refuse("postgrey läuft nicht – erst installieren bzw. starten (apt install postgrey)")
+    host, port = postgrey_port()
+    try:
+        socket.create_connection((host, int(port)), 3).close()
+    except OSError:
+        raise Refuse("postgrey antwortet nicht auf %s:%s – nichts geändert" % (host, port))
+    key = "smtpd_recipient_restrictions"
+    cur = run(["postconf", "-h", key], 10)[1].strip()
+    items = [x for x in re.split(r"[,\s]+", cur) if x]
+    if "check_policy_service" in items:
+        raise Refuse("In %s ist schon ein check_policy_service eingetragen – bitte von Hand prüfen" % key)
+    rule = "check_policy_service inet:%s:%s" % (host, port)
+    if not cur:
+        new = "permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination, " + rule
+    elif "reject_unauth_destination" in items or "defer_unauth_destination" in items \
+            or "reject_unauth_destination" in run(["postconf", "-h", "smtpd_relay_restrictions"], 10)[1]:
+        new = cur.rstrip(", ") + ", " + rule
+    else:
+        raise Refuse("Kein reject_unauth_destination gefunden – Greylisting wird nicht ohne Relay-Schutz eingetragen")
+    changes.append({"postconf": {key: cur}})
+    run(["postconf", "-e", "%s = %s" % (key, new)], 20)
+    rc, out = run(["postfix", "check"], 30)
+    if rc != 0:
+        raise Refuse("postfix check meldet einen Fehler: %s" % out[:200])
+    run(["systemctl", "reload", "postfix"], 30)
+    return "Greylisting in Postfix eingebunden", [
+        "%s = %s" % (key, new),
+        "Erste Mails unbekannter Absender kommen jetzt 5 bis 15 Minuten später an – das ist so gewollt",
+        "Im Mail-Log: grep postgrey /var/log/mail.log"]
+
+
 def do_bind_version(target, fdir, changes):
     p = "/etc/bind/named.conf.options"
     if target != "bind" or not os.path.isfile(p):
@@ -456,7 +497,7 @@ ACTIONS = {"wp-chmod": do_wp_chmod, "sticky": do_sticky, "wp-fileedit": do_wp_fi
            "wp-archive-block": do_wp_archive_block,
            "wp-xmlrpc": do_wp_xmlrpc, "svc-rpcbind": do_svc_rpcbind, "sysctl": do_sysctl, "ssh-safe": do_ssh_safe,
            "ssh-root-keyonly": do_ssh_root_keyonly,
-           "postfix-banner": do_postfix_banner, "bind-version": do_bind_version, "php-ini": do_php_ini,
+           "postfix-banner": do_postfix_banner, "postfix-greylist": do_postfix_greylist, "bind-version": do_bind_version, "php-ini": do_php_ini,
            "quarantine": do_quarantine}
 WEB_ACTIONS = {"wp-fileedit", "wp-uploads", "wp-archive-block", "wp-xmlrpc", "wp-chmod", "php-ini", "quarantine"}
 

@@ -864,6 +864,175 @@ _H = [
     (r"\|.* nicht installiert – Teilprüfung übersprungen", dict(
         why="Ohne dieses Werkzeug fehlt ein Teil der Prüfung.",
         steps=["$ sudo ubusec --install"], effort="5 Min")),
+
+    # ---------------------------------------------------------------- mail ---
+    (r"^mail\|Server könnte als offenes Relay", dict(
+        why="Ohne reject_unauth_destination nimmt Postfix womöglich Mails von jedem für jeden an und leitet sie weiter. "
+            "Spammer finden solche Server innerhalb von Stunden; danach steht die IP auf allen Sperrlisten.",
+        steps=["$ sudo postconf -e 'smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, defer_unauth_destination'",
+               "$ sudo postfix check && sudo systemctl reload postfix",
+               "Testen (von einem anderen Rechner): swaks --to test@example.org --server DEIN-SERVER – muss mit "
+               "„Relay access denied“ abgelehnt werden.",
+               "Danach Warteschlange prüfen: mailq | tail -1"], effort="15 Min")),
+    (r"^mail\|mynetworks erlaubt sehr großen Netzen", dict(
+        why="Alles in mynetworks darf ohne Anmeldung Mails an beliebige Empfänger schicken – praktisch ein offenes Relay.",
+        steps=["$ sudo postconf -e 'mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128'",
+               "$ sudo systemctl reload postfix",
+               "Brauchen andere eigene Server den Versand, deren einzelne IPs ergänzen – nie ganze Netze."], effort="5 Min")),
+    (r"^mail\|Empfang ohne Verschlüsselung", dict(
+        why="Ohne STARTTLS gehen eingehende Mails im Klartext über das Netz. Viele große Anbieter werten das zudem negativ.",
+        steps=["$ sudo postconf -e 'smtpd_tls_security_level = may'",
+               "Zertifikat eintragen (Virtualmin: Webmin → Servers → Postfix → SMTP Authentication And Encryption, "
+               "oder SSL-Zertifikat der Domain „Copy to Postfix“).",
+               "$ sudo systemctl reload postfix"], effort="15 Min")),
+    (r"^mail\|Versand an andere Server unverschlüsselt", dict(
+        why="Postfix versucht beim Versand gar nicht erst, verschlüsselt zu übertragen.",
+        steps=["$ sudo postconf -e 'smtp_tls_security_level = may'", "$ sudo systemctl reload postfix"], effort="5 Min")),
+    (r"^mail\|Anmeldung \(SMTP-AUTH\) auch ohne Verschlüsselung", dict(
+        why="Mailprogramme könnten das Postfach-Passwort unverschlüsselt senden – wer mithört, hat das Postfach.",
+        steps=["$ sudo postconf -e 'smtpd_tls_auth_only = yes'", "$ sudo systemctl reload postfix",
+               "Mailprogramme sollten ohnehin Port 587 mit STARTTLS oder 465 mit SSL/TLS nutzen."], effort="5 Min")),
+    (r"^mail\|TLS-Zertifikat von Postfix ist abgelaufen|^mail\|TLS-Zertifikat von Postfix läuft bald ab", dict(
+        why="Mailprogramme melden Zertifikatsfehler, und Server mit strenger Prüfung liefern nicht mehr zu.",
+        steps=["Virtualmin: Domain des Servernamens → Manage SSL Certificate → Let's Encrypt erneuern, "
+               "dann „Use this certificate for other services“ → Postfix und Dovecot.",
+               "$ sudo systemctl reload postfix dovecot"], effort="15 Min")),
+    (r"^mail\|TLS-Zertifikat von Postfix passt nicht", dict(
+        why="Mailprogramme zeigen eine Zertifikatswarnung, wenn der Servername nicht im Zertifikat steht.",
+        steps=["Zertifikat der Domain, auf die myhostname zeigt, für Postfix und Dovecot verwenden "
+               "(Virtualmin: Manage SSL Certificate → Use this certificate for other services).",
+               "Alternativ myhostname auf den Namen im Zertifikat setzen – muss zum Reverse-DNS passen."], effort="15 Min")),
+    (r"^mail\|Dovecot \(IMAP/POP3\) ohne Verschlüsselung|^mail\|Dovecot erlaubt Passwörter ohne", dict(
+        why="Postfach-Passwörter können beim Abrufen der Mails im Klartext übertragen werden.",
+        steps=["In /etc/dovecot/conf.d/10-ssl.conf: ssl = required",
+               "In /etc/dovecot/conf.d/10-auth.conf: disable_plaintext_auth = yes (Dovecot 2.4: auth_allow_cleartext = no)",
+               "$ sudo doveconf -n >/dev/null && sudo systemctl reload dovecot"], effort="15 Min")),
+    (r"^mail\|Kein Spamfilter", dict(
+        why="Ohne Spamfilter landet jede Werbe- und Betrugsmail direkt im Posteingang der Nutzer.",
+        steps=["Virtualmin: System Settings → Features and Plugins → „Spam filtering“ aktivieren "
+               "(installiert SpamAssassin), dann je Domain einschalten.",
+               "$ sudo virtualmin modify-domain --domain DOMAIN --spam"], effort="15 Min")),
+    (r"^mail\|Spamfilter nicht für alle Domains", dict(
+        why="Der Spamfilter läuft, ist aber für diese Domains abgeschaltet – deren Postfächer bekommen alles ungefiltert.",
+        steps=["Virtualmin: Domain wählen → Edit Virtual Server → Enabled features → „Spam filtering“ anhaken.",
+               "$ sudo virtualmin modify-domain --domain DOMAIN --spam",
+               "Danach erkannter Spam: Virtualmin → Email Settings → Spam and Virus Delivery (z. B. in den Ordner „Junk“)."],
+        effort="5 Min")),
+    (r"^mail\|Greylisting \(postgrey\) läuft, ist aber nicht", dict(
+        why="postgrey ist installiert, wird von Postfix aber nie gefragt. Greylisting weist Mails unbekannter Absender "
+            "beim ersten Versuch vorübergehend ab; echte Mailserver versuchen es nach Minuten erneut, die meisten "
+            "Spam-Programme nicht. Das fängt oft die Hälfte des Spams ab.",
+        steps=["„Korrigieren“ hängt die Regel automatisch an – oder von Hand:",
+               "$ sudo postconf -e \"smtpd_recipient_restrictions = $(postconf -h smtpd_recipient_restrictions), check_policy_service inet:127.0.0.1:10023\"",
+               "$ sudo postfix check && sudo systemctl reload postfix",
+               "Prüfen: grep postgrey /var/log/mail.log | tail (Zeilen mit „action=greylist“).",
+               "Hinweis: erste Mails neuer Absender kommen 5 bis 15 Minuten später an (z. B. Bestätigungscodes)."],
+        effort="5 Min")),
+    (r"^mail\|Kein Greylisting", dict(
+        why="Greylisting weist Mails unbekannter Absender beim ersten Versuch vorübergehend ab. Echte Mailserver "
+            "versuchen es wieder, die meisten Spam-Programme nicht.",
+        steps=["Virtualmin: Email Settings → Greylisting → einschalten (installiert und bindet postgrey ein).",
+               "Oder: sudo apt install postgrey, dann den Eintrag check_policy_service inet:127.0.0.1:10023 "
+               "an smtpd_recipient_restrictions anhängen.",
+               "Nachteil: erste Mails neuer Absender kommen einige Minuten später an."], effort="15 Min")),
+    (r"^mail\|Spamhaus antwortet mit Fehlercode und die Sperrliste hat keinen Filter", dict(
+        why="Spamhaus beantwortet Abfragen über öffentliche DNS-Resolver mit einem Fehlercode (127.255.255.254). "
+            "Ohne Filter wertet Postfix das als Treffer und lehnt damit JEDE eingehende Mail ab.",
+        steps=["Sofort den Filter anhängen:",
+               "$ sudo postconf -e \"smtpd_recipient_restrictions = $(postconf -h smtpd_recipient_restrictions | sed 's/zen.spamhaus.org\\b[^,]*/zen.spamhaus.org=127.0.0.[2..11]/')\"",
+               "$ sudo systemctl reload postfix",
+               "Danach den eigenen Resolver einrichten (siehe Meldung „Spamhaus beantwortet keine Abfragen“)."],
+        effort="5 Min")),
+    (r"^mail\|Spamhaus beantwortet keine Abfragen", dict(
+        why="Spamhaus beantwortet keine Abfragen, die über große öffentliche DNS-Resolver kommen (z. B. die des "
+            "Server-Anbieters, Google, Cloudflare). Die Sperrliste ist eingetragen, filtert aber nichts.",
+        steps=["Läuft BIND auf dem Server (bei Virtualmin üblich), ihn als Resolver für den Server selbst nutzen:",
+               "$ sudo mkdir -p /etc/systemd/resolved.conf.d && printf '[Resolve]\\nDNS=\\nDNS=127.0.0.1\\nDomains=~.\\n' | sudo tee /etc/systemd/resolved.conf.d/lokal.conf",
+               "$ sudo systemctl restart systemd-resolved",
+               "Testen: dig +short 2.0.0.127.zen.spamhaus.org – erwartet sind Antworten 127.0.0.x, nicht 127.255.255.x.",
+               "BIND muss rekursive Anfragen von localhost erlauben (allow-recursion { localhost; }; in named.conf.options).",
+               "Ohne BIND: sudo apt install unbound – Unbound lauscht auf 127.0.0.1 und wird wie oben eingetragen.",
+               "Zurück: sudo rm /etc/systemd/resolved.conf.d/lokal.conf && sudo systemctl restart systemd-resolved"],
+        effort="15 Min")),
+    (r"^mail\|Sperrliste ohne Ergebnisfilter", dict(
+        why="Antwortet die Sperrliste mit einem Fehlercode (z. B. weil der Resolver blockiert ist), zählt Postfix "
+            "das ohne Filter als Treffer und lehnt echte Mails ab.",
+        steps=["Eintrag ändern auf: reject_rbl_client zen.spamhaus.org=127.0.0.[2..11]",
+               "$ sudo postfix check && sudo systemctl reload postfix"], effort="5 Min")),
+    (r"^mail\|Keine Sperrliste \(DNSBL\)", dict(
+        why="Sperrlisten wie Spamhaus kennen Millionen Spam-Server. Mails von dort werden schon beim Verbindungsaufbau "
+            "abgewiesen – bevor der Spamfilter überhaupt arbeiten muss.",
+        steps=["Erst prüfen, ob Spamhaus diesem Server antwortet: dig +short 2.0.0.127.zen.spamhaus.org "
+               "(127.0.0.x = gut; 127.255.255.x = blockiert, dann zuerst eigenen Resolver einrichten).",
+               "$ sudo postconf -e \"smtpd_recipient_restrictions = $(postconf -h smtpd_recipient_restrictions | sed 's/reject_unauth_destination/reject_unauth_destination, reject_rbl_client zen.spamhaus.org=127.0.0.[2..11]/')\"",
+               "$ sudo postfix check && sudo systemctl reload postfix",
+               "Spamhaus ist für kleine, nicht-kommerzielle Server kostenlos."], effort="15 Min")),
+    (r"^mail\|Keine Prüfung von Absenderdomain und HELO", dict(
+        why="Viel Spam kommt mit erfundenen Absenderdomains oder unsinnigem HELO-Namen. Diese Prüfungen sind sicher "
+            "und lehnen kaum echte Mails ab.",
+        steps=["$ sudo postconf -e 'smtpd_helo_required = yes'",
+               "In smtpd_recipient_restrictions nach reject_unauth_destination ergänzen: reject_invalid_helo_hostname, "
+               "reject_non_fqdn_helo_hostname, reject_non_fqdn_sender, reject_non_fqdn_recipient, "
+               "reject_unknown_sender_domain, reject_unknown_recipient_domain, reject_unauth_pipelining",
+               "$ sudo postfix check && sudo systemctl reload postfix"], effort="15 Min")),
+    (r"^mail\|Kein Reverse-DNS-Eintrag", dict(
+        why="Große Anbieter (Gmail, Outlook, GMX) lehnen Mails von IPs ohne Reverse-DNS ab oder sortieren sie als Spam.",
+        steps=["Im Kundenbereich des Server-Anbieters (bei netcup: SCP → Server → Netzwerk → rDNS) für die IP den "
+               "Servernamen eintragen, z. B. mail.example.de.",
+               "Der Name muss per A-Eintrag wieder auf dieselbe IP zeigen."], effort="15 Min")),
+    (r"^mail\|Reverse-DNS passt nicht in beide Richtungen|^mail\|Reverse-DNS und Servername", dict(
+        why="Empfangende Server prüfen, ob IP → Name → IP zusammenpasst und zum HELO-Namen passt. Abweichungen "
+            "erhöhen die Spam-Bewertung.",
+        steps=["Reverse-DNS beim Anbieter, A-Eintrag des Namens und Postfix-myhostname auf denselben Namen bringen.",
+               "$ sudo postconf -e 'myhostname = mail.example.de' && sudo systemctl reload postfix"], effort="15 Min")),
+    (r"^mail\|Server-IP steht auf Sperrlisten", dict(
+        why="Andere Mailserver lehnen Mails dieses Servers ab oder stufen sie als Spam ein. Meist wurde vom Server "
+            "Spam verschickt – über ein gekapertes Postfach, ein Kontaktformular oder eine gehackte Website.",
+        steps=["Ursache zuerst: mailq | tail -1 und grep 'sasl_username' /var/log/mail.log | awk '{print $NF}' | sort | uniq -c | sort -rn | head",
+               "Gefundenes Postfach: Passwort ändern, Warteschlange leeren (postsuper -d ALL deferred nach Prüfung).",
+               "Danach austragen lassen: https://check.spamhaus.org, https://www.spamcop.net/bl.shtml, https://psbl.org"],
+        effort="1 Std")),
+    (r"^mail\|\d+ Mails in der Warteschlange", dict(
+        why="Eine volle Warteschlange heißt meist: der Server verschickt gerade Spam (gekapertes Postfach, Formular, "
+            "Website) – oder ein Zielserver nimmt dauerhaft nichts an.",
+        steps=["$ mailq | head -40",
+               "Absender mit den meisten Mails stehen oben in den Details. Ist es ein Postfach: Passwort sofort ändern.",
+               "Mail ansehen: sudo postcat -q QUEUE-ID | head -60",
+               "Spam löschen (nach Prüfung!): sudo postqueue -p | awk '/absender@domain/ {print $1}' | tr -d '*!' | sudo postsuper -d -"],
+        effort="1 Std")),
+    (r"^mail\|Keine DKIM-Signatur", dict(
+        why="Ohne DKIM können Empfänger nicht prüfen, ob eine Mail wirklich von deinem Server kommt. Gmail und Outlook "
+            "verlangen DKIM inzwischen für zuverlässige Zustellung.",
+        steps=["Virtualmin: Email Settings → DomainKeys Identified Mail → Enabled, Domains auswählen, speichern.",
+               "Liegt das DNS nicht auf dem Server, den angezeigten TXT-Eintrag beim DNS-Anbieter eintragen."],
+        effort="15 Min")),
+    (r"^mail\|DKIM-Schlüssel fehlt im DNS", dict(
+        why="Der Server signiert die Mails, aber der öffentliche Schlüssel steht nicht im DNS – die Signatur gilt dann als "
+            "ungültig, und DMARC schlägt fehl.",
+        steps=["Virtualmin: Email Settings → DomainKeys Identified Mail → unten steht der DNS-Eintrag.",
+               "Beim DNS-Anbieter einen TXT-Eintrag SELECTOR._domainkey mit diesem Wert anlegen.",
+               "Prüfen: dig +short TXT SELECTOR._domainkey.DOMAIN"], effort="15 Min")),
+    (r"^mail\|fail2ban schützt die Mail-Anmeldung nicht", dict(
+        why="Bots probieren rund um die Uhr Passwörter für Postfächer aus. Wird eins erraten, verschickt der Server Spam "
+            "und landet auf Sperrlisten.",
+        steps=["In /etc/fail2ban/jail.local ergänzen:",
+               "[postfix-sasl]\\nenabled = true\\n\\n[dovecot]\\nenabled = true",
+               "$ sudo systemctl reload fail2ban && sudo fail2ban-client status"], effort="15 Min")),
+    (r"^sites\|DNSSEC-Fehler", dict(
+        why="Bei der Registry ist ein DNSSEC-Schlüssel (DS-Eintrag) hinterlegt, der nicht zu den Signaturen der Zone passt. "
+            "Prüfende Resolver (Google, Cloudflare, viele Provider und Mailserver) antworten dann mit SERVFAIL – "
+            "Website und Mail sind für sie nicht erreichbar, für andere schon. Das wirkt oft zufällig.",
+        steps=["Prüfen: dig @1.1.1.1 DOMAIN SOA (SERVFAIL) und dig @1.1.1.1 +cd DOMAIN SOA (Antwort) – und "
+               "https://dnsviz.net/d/DOMAIN/dnssec/",
+               "Beim DNS-Anbieter bzw. Registrar: DNSSEC entweder korrekt aktivieren oder den DS-Eintrag bei der Registry "
+               "löschen lassen.",
+               "Nach der Korrektur dauert es bis zur TTL des DS-Eintrags (oft 1 bis 24 Stunden), bis alle Resolver wieder antworten."],
+        effort="prüfen")),
+    (r"^sites\|Domain über öffentliche DNS-Resolver nicht auflösbar", dict(
+        why="Öffentliche Resolver erhalten keine gültige Antwort für die Domain – sie ist für einen Teil der Besucher "
+            "und Mailserver nicht erreichbar.",
+        steps=["Nameserver prüfen: dig NS DOMAIN und whois DOMAIN | grep -i 'name server'",
+               "https://dnsviz.net/d/DOMAIN/dnssec/ zeigt, wo die Kette bricht."], effort="prüfen")),
 ]
 
 _COMPILED = [(re.compile(p), h) for p, h in _H]

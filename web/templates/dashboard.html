@@ -16,7 +16,7 @@
 {% if not last %}
   <section class="empty">
     <h1>Noch kein Bericht vorhanden</h1>
-    <p>Starte den ersten Vollscan. Er prüft alle zwölf Bereiche und legt die Baseline an, mit der spätere Scans neue Konten, Schlüssel oder Ports erkennen.</p>
+    <p>Starte den ersten Vollscan. Er prüft alle Bereiche und legt die Baseline an, mit der spätere Scans neue Konten, Schlüssel oder Ports erkennen.</p>
     <form method="post" action="{{ url_for('scan') }}">
       <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="kind" value="full">
       <button class="btn btn-primary">Ersten Vollscan starten</button>

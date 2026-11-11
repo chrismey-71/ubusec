@@ -73,15 +73,15 @@ CHECK_DIR=/usr/local/lib/ubusec/checks
 
 # ------------------------------------------------------------- Konstanten ---
 declare -A RANK=([KRITISCH]=4 [HOCH]=3 [MITTEL]=2 [NIEDRIG]=1 [INFO]=0)
-ALL_MODULES="tools updates cve config perms firewall integrity baseline rootkit malware web sites apps"
-QUICK_MODULES="tools updates cve firewall integrity baseline rootkit malware"
+ALL_MODULES="tools updates cve config perms firewall integrity baseline rootkit malware web sites apps mail"
+QUICK_MODULES="tools updates cve firewall integrity baseline rootkit malware mail"
 declare -A MOD_TITLE=(
   [tools]="Prüfwerkzeuge"           [updates]="Updates & Neustarts"   [cve]="CVE-Schwachstellen"
   [config]="Konfiguration & Härtung" [perms]="Dateiberechtigungen"
   [firewall]="Firewall & Ports"     [integrity]="Datei-Integrität"
   [baseline]="Änderungen ggü. Baseline" [rootkit]="Rootkits & Einbruchsspuren"
   [malware]="Malware (ClamAV)"      [web]="Webshells & Web-Malware"
-  [sites]="Websites & Domains"      [apps]="Webanwendungen"
+  [sites]="Websites & Domains"      [apps]="Webanwendungen"           [mail]="E-Mail"
 )
 
 # ----------------------------------------------------------- Hilfsfunktionen ---
@@ -1731,6 +1731,7 @@ run_webcheck() {
 }
 mod_sites() { run_webcheck sites; }
 mod_apps()  { run_webcheck apps; }
+mod_mail()  { run_webcheck mail; }
 mod_tools() {
   run_webcheck tools
   [ -f "$STATE_DIR/tools.json" ] && { chgrp "$(grp)" "$STATE_DIR/tools.json"; chmod 640 "$STATE_DIR/tools.json"; }
@@ -2684,7 +2685,7 @@ process_queue() { # process_queue req|ctl
         # sichert vor jeder Änderung und nimmt sie bei Fehlern der Website selbst zurück
         local fo=${REQ[op]:-} fk=${REQ[kind]:-} ft=${REQ[target]:-} fd=${REQ[domain]:-} fid=${REQ[id]:-} fdir=$STATE_DIR/fixes
         [[ $fo =~ ^(apply|undo)$ ]] || { audit "ABGELEHNT $user: Korrektur-Aktion"; continue; }
-        [[ $fk =~ ^(wp-chmod|wp-fileedit|wp-uploads|wp-archive-block|wp-xmlrpc|svc-rpcbind|sysctl|ssh-safe|ssh-root-keyonly|postfix-banner|bind-version|php-ini|quarantine|sticky)$ ]] \
+        [[ $fk =~ ^(wp-chmod|wp-fileedit|wp-uploads|wp-archive-block|wp-xmlrpc|svc-rpcbind|sysctl|ssh-safe|ssh-root-keyonly|postfix-banner|postfix-greylist|bind-version|php-ini|quarantine|sticky)$ ]] \
           || { audit "ABGELEHNT $user: Korrektur-Art '$fk'"; continue; }
         [[ $fid =~ ^[a-f0-9]{16}$ ]] || { audit "ABGELEHNT $user: Korrektur-ID"; continue; }
         local fok=0
@@ -2692,7 +2693,7 @@ process_queue() { # process_queue req|ctl
           svc-rpcbind) [ "$ft" = rpcbind ] && fok=1 ;;
           sysctl) [ "$ft" = kernel ] && fok=1 ;;
           ssh-safe|ssh-root-keyonly) [ "$ft" = sshd ] && fok=1 ;;
-          postfix-banner) [ "$ft" = postfix ] && fok=1 ;;
+          postfix-banner|postfix-greylist) [ "$ft" = postfix ] && fok=1 ;;
           bind-version) [ "$ft" = bind ] && fok=1 ;;
           sticky) [[ $ft =~ ^/[A-Za-z0-9._/@+:-]{1,300}$ && $ft != *"/../"* && $ft != /proc* && $ft != /sys* ]] && fok=1 ;;
           php-ini) [[ $ft =~ ^/(etc/php|home)/[A-Za-z0-9._/-]{1,200}/php\.ini$ && $ft != *"/../"* ]] && fok=1 ;;

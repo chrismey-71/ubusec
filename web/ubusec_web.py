@@ -87,9 +87,10 @@ MODULES = [
     ("web", "Webshells & Web-Malware", "PHP-Webshells, PHP in Upload-Ordnern"),
     ("sites", "Websites & Domains", "HTTPS, Zertifikate, Sicherheits-Header, offene Dateien, SPF/DMARC/CAA"),
     ("apps", "Webanwendungen", "WordPress, Nextcloud, Mautic, Roundcube, eigene PHP-Apps, PHP, MySQL"),
+    ("mail", "E-Mail", "Offenes Relay, Verschlüsselung, Spamfilter, Greylisting, Sperrlisten, DKIM, Ruf der Server-IP, Warteschlange"),
 ]
 MOD_TITLE = {m: t for m, t, _ in MODULES}
-QUICK = ["tools", "updates", "cve", "firewall", "integrity", "baseline", "rootkit", "malware"]
+QUICK = ["tools", "updates", "cve", "firewall", "integrity", "baseline", "rootkit", "malware", "mail"]
 SEVERITIES = ["KRITISCH", "HOCH", "MITTEL", "NIEDRIG", "INFO"]
 SEV_NAME = {"KRITISCH": "Kritisch", "HOCH": "Hoch", "MITTEL": "Mittel", "NIEDRIG": "Niedrig", "INFO": "Info"}
 def read_version():
@@ -335,6 +336,10 @@ FIX_TEXT = {
     "postfix-banner": ("Postfix-Banner verkürzen, VRFY abschalten",
                        "Setzt smtpd_banner = $myhostname ESMTP und disable_vrfy_command = yes, prüft mit postfix check und "
                        "lädt Postfix neu. Mails werden weiter normal zugestellt."),
+    "postfix-greylist": ("Greylisting in Postfix einbinden",
+                         "Hängt check_policy_service inet:127.0.0.1:<Port von postgrey> an smtpd_recipient_restrictions an "
+                         "(nach reject_unauth_destination), prüft mit postfix check und lädt Postfix neu. Erste Mails "
+                         "unbekannter Absender kommen danach einige Minuten später an. „Rückgängig machen“ stellt die alte Zeile wieder her."),
     "bind-version": ("BIND-Version verbergen",
                      "Ergänzt version \"none\"; im options-Block von /etc/bind/named.conf.options, prüft mit "
                      "named-checkconf und lädt BIND neu."),
@@ -398,6 +403,8 @@ def fix_specs(f, report):
         add("ssh-safe", "sshd")
     if mod == "config" and "information disclosure in SMTP banner" in msg:
         add("postfix-banner", "postfix")
+    if mod == "mail" and msg.startswith("Greylisting (postgrey) läuft, ist aber nicht"):
+        add("postfix-greylist", "postfix")
     if mod == "config" and "Found BIND version in banner" in msg:
         add("bind-version", "bind")
     if mod == "apps" and re.match(r"PHP: (Session-Cookies ohne HttpOnly|expose_php aktiv)", msg):
