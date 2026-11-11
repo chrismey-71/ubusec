@@ -2,6 +2,15 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.16 – 2026-11-11
+
+- **AIDE liest große Videos nicht mehr jedes Mal komplett:** Für Video- und Audiodateien (mp4, mov, mkv, webm, mp3,
+  wav …) in /home, /var/www und /srv prüft AIDE nur noch Größe, Zeitstempel, Besitzer und Rechte, keine Prüfsumme.
+  Ein Upload-Ordner mit Videos kostete sonst bei jedem Vollscan Gigabytes an Lesezugriffen. PHP, JavaScript und
+  .htaccess bleiben voll geprüft. Beim ersten Vollscan danach erscheinen die Mediendateien einmalig als geändert
+  (im Befund eigens ausgewiesen, nicht als unerklärte Änderung) – danach „Baseline übernehmen“. Versteht eine
+  ältere AIDE-Version die Regel nicht, lässt ubusec sie weg.
+
 ## 1.5.15 – 2026-11-11
 
 - **Neuer Prüfbereich „E-Mail“** (läuft bei Schnell- und Vollscan mit, einzeln über „Ausgewählte Bereiche“):
@@ -21,12 +30,6 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 - **DNSSEC-Fehler werden erkannt** (Bereich „Websites & Domains“): Liefert ein öffentlicher Resolver SERVFAIL,
   ohne DNSSEC-Prüfung aber eine Antwort, passt der DS-Eintrag bei der Registry nicht – die Domain ist dann für viele
   Besucher und Mailserver nicht erreichbar, für andere schon.
-- **AIDE liest große Videos nicht mehr jedes Mal komplett:** Für Video- und Audiodateien (mp4, mov, mkv, webm, mp3,
-  wav …) in /home, /var/www und /srv prüft AIDE nur noch Größe, Zeitstempel, Besitzer und Rechte, keine Prüfsumme.
-  Ein Upload-Ordner mit Videos kostete sonst bei jedem Vollscan Gigabytes an Lesezugriffen. PHP, JavaScript und
-  .htaccess bleiben voll geprüft. Beim ersten Vollscan danach erscheinen die Mediendateien einmalig als geändert
-  (im Befund eigens ausgewiesen, nicht als unerklärte Änderung) – danach „Baseline übernehmen“. Versteht eine
-  ältere AIDE-Version die Regel nicht, lässt ubusec sie weg.
 - **AIDE und Linux Malware Detect zeigen, wo sie gerade sind:** Während der Prüfung steht in der Weboberfläche neben
   der Laufzeit der Ordner, den das Werkzeug gerade liest („– gerade: /home/…/wp-content/plugins/…“), aktualisiert
   alle 10 Sekunden.
