@@ -33,4 +33,4 @@ ubusec läuft als root. Besonders wichtig sind deshalb:
 - Schwächen im Update-Weg (`--update`, Prüfsummen, Releases)
 
 Kein Sicherheitsproblem im Sinne dieser Richtlinie sind Befunde, die ubusec auf
-deinem eigenen Server meldet – die sind ja gerade sein Zweck.
+deinem eigenen Server meldet, die sind ja gerade sein Zweck.
