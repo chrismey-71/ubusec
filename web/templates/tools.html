@@ -11,7 +11,7 @@
 {% endif %}
 
 {% if upd.result and not status.ctl_pending %}
-  {% set what = {'install-aide': 'AIDE: Installation', 'install-maldet': 'Linux Malware Detect: Installation', 'update': 'Aktualisierung der Werkzeuge', 'lynis': 'Einrichtung der Lynis-Paketquelle'}.get(upd.action, 'Aktion') %}
+  {% set what = {'install-aide': 'AIDE: Installation', 'install-maldet': 'Linux Malware Detect: Installation', 'uninstall-aide': 'AIDE: Entfernen', 'uninstall-maldet': 'Linux Malware Detect: Entfernen', 'update': 'Aktualisierung der Werkzeuge', 'lynis': 'Einrichtung der Lynis-Paketquelle'}.get(upd.action, 'Aktion') %}
   {% if upd.result == 'ok' %}
   <p class="flash flash-ok">✓ {{ what }} erfolgreich abgeschlossen ({{ upd.time | ago }}).
     {% if upd.action == 'install-maldet' %} Linux Malware Detect prüft ab dem nächsten Vollscan die Webordner; Signaturen und Programm aktualisiert es selbst.
@@ -68,6 +68,21 @@
         <button class="btn" data-confirm="{{ t.name }} jetzt {{ 'einrichten' if t.present else 'installieren' }}?">{{ t.name }} {{ 'einrichten' if t.present else 'installieren' }}</button>
       </form>
     </div>
+  </td></tr>
+  {% elif t.name in ('AIDE', 'Linux Malware Detect') and t.present and not upd.running %}
+  <tr class="tool-offer"><td colspan="5">
+    <details class="tool-remove"><summary class="small">{{ t.name }} wieder entfernen …</summary>
+      <p class="small">{% if t.name == 'AIDE' %}AIDE meldet jede Änderung an Systemdateien, braucht beim Vollscan aber viel Zeit und Arbeitsspeicher.
+        Ohne AIDE prüft ubusec weiterhin Programmdateien gegen die Ubuntu-Pakete (dpkg) und vergleicht Benutzer, Dienste und Cronjobs mit der Baseline.
+        Die AIDE-Datenbank wird mit gelöscht.
+        {% else %}Linux Malware Detect ergänzt ClamAV um Erkennungsmuster für Website-Schadcode, verlängert aber den Scan.
+        Ohne es suchen weiterhin ClamAV und die eigene Webshell-Prüfung von ubusec. Signaturen und seine Quarantäne werden mit gelöscht.{% endif %}
+        Du kannst es jederzeit hier wieder installieren.</p>
+      <form method="post" action="{{ url_for('tools_action', aktion=('aide-entfernen' if t.name == 'AIDE' else 'maldet-entfernen')) }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn btn-quiet" data-confirm="{{ t.name }} wirklich entfernen?">{{ t.name }} entfernen</button>
+      </form>
+    </details>
   </td></tr>
   {% endif %}
   {% endfor %}

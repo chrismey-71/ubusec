@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.14"
+UBUSEC_VERSION="1.5.15"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -735,7 +735,8 @@ mod_integrity() {
     elif [ -f "$db" ] && [ "$MODE" != full ] && [ "${AIDE_QUICK:-0}" != 1 ]; then
       add INFO integrity "AIDE prüft beim Vollscan (dauert auf großen Servern länger; für den Schnellscan: AIDE_QUICK=1)"
     elif [ -f "$db" ]; then
-      aide --config=/etc/aide/aide.conf --check >"$RAW/aide.txt" 2>&1; rc=$?
+      run_heartbeat "AIDE vergleicht die Systemdateien mit dem gespeicherten Stand" \
+        aide --config=/etc/aide/aide.conf --check >"$RAW/aide.txt" 2>&1; rc=$?; SUB_TEXT=""
       if (( rc >= 1 && rc <= 7 )); then
         # Liste einordnen: was erklären Paket-Updates seit dem AIDE-Stand, was bleibt übrig – zusammengefasst je Ordner
         python3 -I - "$RAW/aide.txt" "$db" >"$RAW/aide-summary.txt" 2>/dev/null <<'PYA'
@@ -1524,8 +1525,23 @@ mod_malware() {
 # ============================================================================
 #  MODUL: web – Webshells, PHP in Upload-Ordnern, Linux Malware Detect
 # ============================================================================
+hb_current() { # hb_current PID – Ordner der Datei, die der Prozess (oder einer seiner Kindprozesse) gerade liest
+  local p c f all=$1 todo=$1
+  while [ -n "$todo" ]; do
+    c=""; for p in $todo; do c="$c $(pgrep -P "$p" 2>/dev/null | tr '\n' ' ')"; done
+    todo=$(echo $c); all="$all $todo"
+  done
+  for p in $all; do
+    for f in /proc/"$p"/fd/*; do
+      f=$(readlink "$f" 2>/dev/null) || continue
+      case $f in /proc/*|/dev/*|/sys/*|/run/*|pipe:*|socket:*|anon_inode:*|/usr/local/maldetect/*|/var/lib/aide/*|/var/lib/clamav/*|"$LOG_DIR"/*|"$STATE_DIR"/*|/tmp/*) continue ;; esac
+      [ -f "$f" ] && { c=${f%/*}; (( ${#c} > 80 )) && c="${c:0:36}…${c: -40}"; echo "$c"; return; }
+    done
+  done
+}
+
 run_heartbeat() { # run_heartbeat "Text" befehl … – zeigt während langer Schritte „Text – läuft seit N Min.“ an
-  local txt=$1 pid t0; shift
+  local txt=$1 pid t0 cur; shift
   t0=$(date +%s); SUB_TOTAL=0; SUB_DONE=0; SUB_START=$t0
   SUB_TEXT="$txt"; write_status true "$CUR_MOD" "$MOD_I" "$MOD_N"
   "$@" & pid=$!
@@ -1533,6 +1549,7 @@ run_heartbeat() { # run_heartbeat "Text" befehl … – zeigt während langer Sc
     sleep 10
     local el=$(( $(date +%s) - t0 ))
     if (( el < 60 )); then SUB_TEXT="$txt – läuft seit $el s"; else SUB_TEXT="$txt – läuft seit $(( el / 60 )) Min."; fi
+    cur=$(hb_current "$pid"); [ -n "$cur" ] && SUB_TEXT="$SUB_TEXT – gerade: $cur"
     write_status true "$CUR_MOD" "$MOD_I" "$MOD_N"
   done
   wait "$pid"
@@ -2155,6 +2172,40 @@ aide_init_bg() { # Datenbank im Hintergrund anlegen (kann auf großen Servern la
   sleep 1; UBUSEC_FORCE_CHECK=1 check_tools >/dev/null   # Seite „Werkzeuge“ zeigt sofort „wird eingerichtet“
 }
 MALDET_URL=https://www.rfxn.com/downloads/maldetect-current.tar.gz   # laut rfxn.com/projects/linux-malware-detect
+uninstall_optional() { # uninstall_optional aide|maldet – optionale Werkzeuge wieder entfernen
+  local tool=$1 log=$STATE_DIR/tools-update.log rc=0
+  ensure_dirs; tools_state true "uninstall-$tool"
+  {
+    echo "=== $tool entfernen – $(date '+%d.%m.%Y %H:%M')"
+    export DEBIAN_FRONTEND=noninteractive
+    case $tool in
+      aide)
+        systemctl stop ubusec-aide-init.service 2>/dev/null
+        rm -f "$STATE_DIR"/aide-init.running "$STATE_DIR"/aide-init.json
+        # auch die täglichen Prüfungen des Pakets (dailyaidecheck.timer) verschwinden mit dem Paket
+        apt-get purge -y -q aide aide-common || rc=1
+        rm -rf /var/lib/aide /etc/aide/aide.conf.d/99_ubusec_excludes
+        have aide && rc=1 ;;
+      maldet)
+        pkill -f "/usr/local/maldetect/" 2>/dev/null
+        if [ -f /usr/local/maldetect/uninstall.sh ]; then
+          echo y | bash /usr/local/maldetect/uninstall.sh || rc=1
+        else
+          systemctl disable --now maldet.service 2>/dev/null
+          rm -f /etc/cron.d/maldet_pub /etc/cron.daily/maldet /etc/cron.weekly/maldet-watchdog \
+                /usr/local/sbin/maldet /usr/local/sbin/lmd /var/lib/clamav/rfxn.* /var/lib/clamav/lmd.user.*
+          rm -rf /usr/local/maldetect*
+        fi
+        have maldet && rc=1 ;;
+      *) rc=1 ;;
+    esac
+    [ $rc = 0 ] && echo "=== fertig" || echo "=== fehlgeschlagen"
+  } >"$log" 2>&1
+  UBUSEC_FORCE_CHECK=1 check_tools >/dev/null
+  tools_state false "uninstall-$tool" "$([ $rc = 0 ] && echo ok || echo failed)"
+  return $rc
+}
+
 install_optional() { # install_optional aide|maldet
   local tool=$1 log=$STATE_DIR/tools-update.log rc=0 ok=0
   ensure_dirs; tools_state true "install-$tool"
@@ -2598,6 +2649,10 @@ process_queue() { # process_queue req|ctl
         local tool=${REQ[tool]:-}
         [[ $tool =~ ^(aide|maldet)$ ]] || { audit "ABGELEHNT $user: Werkzeug '$tool'"; continue; }
         audit "WERKZEUG INSTALLIEREN $user: $tool"; install_optional "$tool" || audit "WERKZEUG INSTALLIEREN fehlgeschlagen: $tool" ;;
+      tooluninstall)
+        local tool=${REQ[tool]:-}
+        [[ $tool =~ ^(aide|maldet)$ ]] || { audit "ABGELEHNT $user: Werkzeug '$tool'"; continue; }
+        audit "WERKZEUG ENTFERNEN $user: $tool"; uninstall_optional "$tool" || audit "WERKZEUG ENTFERNEN fehlgeschlagen: $tool" ;;
       aideinit)
         have aide || { audit "ABGELEHNT $user: AIDE fehlt"; continue; }
         audit "AIDE EINRICHTEN $user"; aide_excludes; aide_init_bg ;;

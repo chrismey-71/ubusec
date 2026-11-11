@@ -2,6 +2,15 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.15 – 2026-11-11
+
+- **AIDE und Linux Malware Detect zeigen, wo sie gerade sind:** Während der Prüfung steht in der Weboberfläche neben
+  der Laufzeit der Ordner, den das Werkzeug gerade liest („– gerade: /home/…/wp-content/plugins/…“), aktualisiert
+  alle 10 Sekunden.
+- **AIDE und Linux Malware Detect lassen sich wieder entfernen:** Seite „Werkzeuge“ → „… wieder entfernen“, mit
+  Erklärung, was danach weiter geprüft wird. Datenbank bzw. Signaturen und Quarantäne werden mit gelöscht;
+  Neuinstallation jederzeit möglich.
+
 ## 1.5.14 – 2026-11-10
 
 - **Linux Malware Detect durchsuchte die Websites gar nicht:** Bis 1.5.12 übergab ubusec die Ordner als
