@@ -2,6 +2,15 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.17 – 2026-11-12
+
+- **Linux Malware Detect prüft jetzt wirklich parallel.** Ist ClamAV installiert, schob maldet bisher alles an einen
+  einzigen clamscan-Prozess – die Einstellung „Parallele Prüfungen“ galt dann nicht, und maldet prüfte zudem doppelt,
+  was der Virenscan von ubusec schon parallel mit ClamAV prüft. ubusec lässt maldet jetzt mit seiner eigenen
+  Prüfroutine laufen (`scan_clamscan=0`): bis zu 8 Prozesse gleichzeitig, dazu die nur dort verfügbaren
+  csig-Signaturen. maldet nimmt dabei seine Signaturen (rfxn.*) wieder aus den ClamAV-Ordnern – jedes Werkzeug prüft
+  seine eigenen, keine doppelt. Für die YARA-Regeln von maldet installiert ubusec das kleine Paket `yara`.
+
 ## 1.5.16 – 2026-11-11
 
 - **Firewall: ungefiltertes IPv6 wird erkannt.** Hat der Server eine erreichbare IPv6-Adresse, prüft ubusec, ob die

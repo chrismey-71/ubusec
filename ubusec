@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.16"
+UBUSEC_VERSION="1.5.17"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -1717,22 +1717,32 @@ WPAT
       if grep -q '^scan_tmpdir_paths=' "$mconf"; then sed -i 's|^scan_tmpdir_paths=.*|scan_tmpdir_paths="/var/tmp /dev/shm"|' "$mconf"
       else echo 'scan_tmpdir_paths="/var/tmp /dev/shm"' >>"$mconf"; fi
       { cat "$mign" 2>/dev/null; clam_excludes; } | grep '^/' | sort -u >"$mign.new" && mv -f "$mign.new" "$mign"
+      # maldet mit eigener Prüfroutine statt über ClamAV: Mit ClamAV als Unterbau läuft maldet in EINEM clamscan-
+      # Prozess (scan_workers gilt dann nicht) und prüft doppelt, was der Virenscan von ubusec schon parallel prüft.
+      # Mit scan_clamscan=0 arbeitet maldet mit mehreren Prozessen und nimmt seine Signaturen aus den ClamAV-Ordnern
+      # wieder heraus – so prüft jedes Werkzeug seine eigenen Signaturen, keine doppelt.
+      if grep -q '^scan_clamscan=' "$mconf"; then sed -i 's|^scan_clamscan=.*|scan_clamscan="0"|' "$mconf"
+      else echo 'scan_clamscan="0"' >>"$mconf"; fi
+    fi
+    # YARA-Regeln von maldet brauchen ohne ClamAV das Programm yara (kleines Ubuntu-Paket)
+    if ! have yara; then
+      DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=10 install -y -qq yara >/dev/null 2>&1 && log "   yara installiert (für die YARA-Regeln von Linux Malware Detect)"
     fi
     # Schnellscan: nur Dateien der letzten 2 Tage (maldet -r); Vollscan: alles (maldet -a) – je Ordner einzeln,
     # maldet versteht keine durch Komma getrennte Liste (bis 1.5.12 wurde dadurch nur /tmp durchsucht)
     local r days=2 mw=auto
     # Parallele Prüfungen: Einstellung „Parallele Prüfungen“ übernehmen (maldet erlaubt höchstens 8);
-    # „Automatisch“ überlässt es maldet (2 je CPU-Kern, höchstens 8). Läuft der ClamAV-Dienst, nutzt maldet ihn selbst.
+    # „Automatisch“ überlässt es maldet (2 je CPU-Kern, höchstens 8).
     if [ "${CLAM_PARALLEL:-0}" -gt 0 ] 2>/dev/null; then mw=$(( CLAM_PARALLEL > 8 ? 8 : CLAM_PARALLEL )); fi
     : >"$RAW/maldet.txt"
     for r in "${roots[@]}"; do
       if [ "$MODE" = full ]; then
         log "   Linux Malware Detect durchsucht: $r (vollständig)"
-        run_heartbeat "Linux Malware Detect durchsucht $r vollständig" nice -n 19 maldet -co "scan_workers=$mw" -a "$r" >>"$RAW/maldet.txt" 2>&1
+        run_heartbeat "Linux Malware Detect durchsucht $r vollständig" nice -n 19 maldet -co "scan_workers=$mw,scan_clamscan=0" -a "$r" >>"$RAW/maldet.txt" 2>&1
       else
         log "   Linux Malware Detect durchsucht: $r (Dateien der letzten $days Tage)"
         run_heartbeat "Linux Malware Detect prüft in $r die Dateien der letzten $days Tage" \
-          nice -n 19 maldet -co "scan_workers=$mw" -r "$r" "$days" >>"$RAW/maldet.txt" 2>&1
+          nice -n 19 maldet -co "scan_workers=$mw,scan_clamscan=0" -r "$r" "$days" >>"$RAW/maldet.txt" 2>&1
       fi
     done
     SUB_TEXT=""
@@ -2292,12 +2302,13 @@ install_optional() { # install_optional aide|maldet
            && d=$(dirname "$(find "$tmp" -maxdepth 2 -name install.sh | head -1)") && [ -f "$d/install.sh" ]; then
           echo "Heruntergeladen: $MALDET_URL ($(sha256sum "$tmp/maldet.tgz" | cut -c1-16)…)"
           (cd "$d" && ./install.sh) | tail -5
+          apt-get install -y -q yara >/dev/null 2>&1 && echo "yara installiert (für die YARA-Regeln von maldet)"
           local conf=/usr/local/maldetect/conf.maldet
           if [ -f "$conf" ]; then
             # ubusec ruft maldet selbst auf: kein eigener täglicher Scan, keine Mails, nichts automatisch in Quarantäne;
             # Signaturen und Programm aktualisiert maldet weiter selbst (mit Prüfsummen-Abgleich)
             local kv k
-            for kv in cron_daily_scan=0 email_alert=0 quarantine_hits=0 scan_clamscan=auto autoupdate_signatures=1 \
+            for kv in cron_daily_scan=0 email_alert=0 quarantine_hits=0 scan_clamscan=0 autoupdate_signatures=1 \
                       autoupdate_version=1 autoupdate_version_hashed=1; do
               k=${kv%%=*}
               if grep -q "^$k=" "$conf"; then sed -i "s|^$k=.*|$k=\"${kv#*=}\"|" "$conf"; else echo "$k=\"${kv#*=}\"" >>"$conf"; fi
