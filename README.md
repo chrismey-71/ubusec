@@ -37,7 +37,7 @@ Neueste Version unter [Releases](https://github.com/chrismey-71/ubusec/releases)
 prüfen und installieren (Versionsnummer anpassen):
 
 ```bash
-VER=1.5.17
+VER=1.5.18
 curl -fLO https://github.com/chrismey-71/ubusec/releases/download/v$VER/ubusec-$VER.tar.gz
 curl -fLO https://github.com/chrismey-71/ubusec/releases/download/v$VER/SHA256SUMS
 sha256sum -c SHA256SUMS
