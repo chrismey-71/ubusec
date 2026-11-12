@@ -2182,9 +2182,27 @@ tools_state() { # tools_state true|false aktion [ok|failed]  – das Ergebnis ze
 # AIDE: Dateiintegrität für das ganze System (auch Konfigurationen und Programme außerhalb von Paketen).
 # Große, sich ständig ändernde Datenordner werden ausgenommen, damit Datenbank und Prüfung überschaubar bleiben.
 AIDE_MEDIA_RX='(?i:mp4|m4v|mov|mkv|avi|webm|wmv|flv|mpe?g|m2ts|mts|3gp|mp3|m4a|wav|flac|ogg|oga|opus|aac|wma|iso)'
+aide_workers() { # Mehrere Prüf-Threads (num_workers, ab AIDE 0.18) – eigene Datei, damit die Regeldatei unverändert bleibt
+  local f=/etc/aide/aide.conf.d/98_ubusec_workers v n
+  [ -d /etc/aide/aide.conf.d ] && have aide || return 0
+  v=$(aide --version 2>&1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+  if [ -z "$v" ] || [ "$(printf '%s\n' 0.18 "$v" | sort -V | head -1)" != 0.18 ]; then rm -f "$f"; return 0; fi
+  # „Parallele Prüfungen“ aus den Einstellungen, sonst ein Thread je CPU-Kern (höchstens 8) – AIDE läuft mit
+  # niedrigster CPU- und Festplatten-Priorität, die Websites bleiben also bevorzugt
+  if [ "${CLAM_PARALLEL:-0}" -gt 0 ] 2>/dev/null; then n=$CLAM_PARALLEL
+  else n=$(nproc 2>/dev/null || echo 2); (( n > 8 )) && n=8; fi
+  (( n < 1 )) && n=1
+  printf '# von ubusec – Anzahl paralleler Prüf-Threads (Einstellung „Parallele Prüfungen“)\nnum_workers=%s\n' "$n" >"$f.tmp"
+  chmod 644 "$f.tmp"
+  if cmp -s "$f.tmp" "$f"; then rm -f "$f.tmp"; return 0; fi
+  mv -f "$f.tmp" "$f"
+  aide --config=/etc/aide/aide.conf --config-check >/dev/null 2>&1 || rm -f "$f"
+  return 0
+}
 aide_excludes() {
   local d f=/etc/aide/aide.conf.d/99_ubusec_excludes
   [ -d /etc/aide/aide.conf.d ] || return 0
+  aide_workers
   {
     echo "# von ubusec – große oder sich ständig ändernde Datenordner nicht überwachen"
     for d in /var/lib/mysql /var/lib/postgresql /var/lib/docker /var/lib/containerd /var/lib/clamav /var/lib/ubusec \

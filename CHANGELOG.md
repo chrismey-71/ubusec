@@ -4,6 +4,11 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.5.17 – 2026-11-12
 
+- **AIDE prüft mit mehreren Threads.** AIDE kann das seit Version 0.18 (Ubuntu 24.04 und neuer), nutzt aber
+  standardmäßig nur einen. ubusec setzt `num_workers` jetzt auf die Einstellung „Parallele Prüfungen“ bzw.
+  automatisch auf einen Thread je CPU-Kern (höchstens 8) – in einer eigenen Datei
+  `/etc/aide/aide.conf.d/98_ubusec_workers`, sodass die Prüfregeln unverändert bleiben. Gilt für das Anlegen der
+  Datenbank und jede Prüfung. Ältere AIDE-Versionen (Ubuntu 22.04) bleiben bei einem Thread.
 - **Linux Malware Detect prüft jetzt wirklich parallel.** Ist ClamAV installiert, schob maldet bisher alles an einen
   einzigen clamscan-Prozess – die Einstellung „Parallele Prüfungen“ galt dann nicht, und maldet prüfte zudem doppelt,
   was der Virenscan von ubusec schon parallel mit ClamAV prüft. ubusec lässt maldet jetzt mit seiner eigenen
