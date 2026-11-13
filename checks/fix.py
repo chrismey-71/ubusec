@@ -382,7 +382,8 @@ def do_postfix_greylist(target, fdir, changes):
     key = "smtpd_recipient_restrictions"
     cur = run(["postconf", "-h", key], 10)[1].strip()
     items = [x for x in re.split(r"[,\s]+", cur) if x]
-    if "check_policy_service" in items:
+    classes = [x for x in re.split(r"[,\s]+", run(["postconf", "-h", "smtpd_restriction_classes"], 10)[1]) if x]
+    if "check_policy_service" in items or any("check_policy_service" in run(["postconf", "-h", c], 10)[1] for c in classes):
         raise Refuse("In %s ist schon ein check_policy_service eingetragen – bitte von Hand prüfen" % key)
     rule = "check_policy_service inet:%s:%s" % (host, port)
     if not cur:

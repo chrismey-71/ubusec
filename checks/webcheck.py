@@ -1678,6 +1678,10 @@ def check_spam(conf):
         add("MITTEL", "Kein Spamfilter gefunden (SpamAssassin, Rspamd oder Amavis)")
     # Greylisting
     rcpt = restr(conf, "smtpd_recipient_restrictions")
+    # auch selektives Greylisting erkennen: check_policy_service in einer Restriction-Klasse, die z. B. über
+    # check_reverse_client_hostname_access nur für verdächtige Server aufgerufen wird
+    for cls in restr(conf, "smtpd_restriction_classes"):
+        rcpt += restr(conf, cls)
     pol = [x for i, x in enumerate(rcpt) if x.startswith("inet:") and i and rcpt[i - 1] == "check_policy_service"]
     grey = svc_active("postgrey")
     if grey and not pol:

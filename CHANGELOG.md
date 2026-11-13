@@ -2,6 +2,12 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.19 – 2026-11-13
+
+- **E-Mail: selektives Greylisting wird erkannt.** Wer postgrey nur für verdächtige Absender-Server aufruft (ohne
+  Reverse-DNS oder mit IP-Adresse im Namen, über eine Restriction-Klasse), bekam bisher fälschlich „Greylisting läuft,
+  ist aber nicht eingebunden“. Der Hinweis zum Greylisting nennt außerdem die Wege gegen verspätete Bestätigungscodes.
+
 ## 1.5.18 – 2026-11-12
 
 - **AIDE prüft mit mehreren Threads.** AIDE kann das seit Version 0.18 (Ubuntu 24.04 und neuer), nutzt aber
