@@ -884,7 +884,12 @@ _H = [
                "Bei „Can't open file … rfxn.*“ (Signaturen von Linux Malware Detect): sudo rm -f /var/lib/clamav/rfxn.* /var/lib/clamav/lmd.user.*",
                "$ sudo systemctl reset-failed clamav-daemon && sudo systemctl restart clamav-daemon",
                "Nach 30–60 Sekunden prüfen: timeout 30 clamdscan /etc/os-release – muss „OK“ melden.",
-               "Hängende Mailprüfungen beenden und Zustellung anstoßen: sudo pkill -f clam-wrapper.pl; sudo postqueue -f"],
+               "ACHTUNG: hängende Prüfprozesse (clam-wrapper.pl, clamdscan) NICHT beenden – Virtualmin wertet den "
+               "Abbruch als Virusfund und verwirft die Mail (procmail: „Program failure … Mode:Virus“).",
+               "Stattdessen Postfix neu starten: sudo systemctl restart postfix – die gerade zugestellten Mails bleiben "
+               "dabei in der Warteschlange und werden neu zugestellt (schlimmstenfalls doppelt, nie verloren).",
+               "Vorbeugend in Virtualmin: Email Settings → Spam and Virus Delivery → Virus-Mails in einen Ordner "
+               "(z. B. Maildir/.Virus/) statt löschen – Fehlalarme lassen sich dann zurückholen."],
         effort="15 Min")),
     # ---------------------------------------------------------------- mail ---
     (r"^mail\|Server könnte als offenes Relay", dict(
