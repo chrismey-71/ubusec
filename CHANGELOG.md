@@ -8,6 +8,10 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
   - ubusec räumt übrig gebliebene Signaturdateien von Linux Malware Detect (`rfxn.*`) aus den ClamAV-Ordnern – vor
     dem Virenscan und nach jedem maldet-Lauf. Eine unlesbare oder verwaiste `rfxn.ndb` ließ clamd beim Start abbrechen;
     systemd startete ihn endlos neu, und die Virenprüfung eingehender Mails (Virtualmin) hing.
+  - maldet verändert die ClamAV-Ordner gar nicht mehr: ubusec setzt in `/etc/default/maldet` (wird von maldet
+    zuletzt geladen und bei maldet-Updates nicht überschrieben) `scan_clamscan="0"` und `clamav_paths=""`. Bisher
+    kopierte maldet seine Signaturen bei jedem Signatur-Update (alle 6 Stunden) wieder nach /var/lib/clamav und lud
+    clamd neu, während der Scan sie wieder entfernte – dieses Hin und Her kann clamd beim Neustart erwischen.
   - Neue Meldung HOCH „ClamAV-Dienst antwortet nicht“ mit dem letzten Fehler aus dem Protokoll und einer Anleitung.
   - needrestart startet die ubusec-Dienste nicht mehr neu (`/etc/needrestart/conf.d/ubusec.conf`). Ein Neustart des
     laufenden Vollscans hatte den Neustart-Befehl – und damit das automatische Update – stundenlang blockiert.

@@ -1346,6 +1346,20 @@ clam_workers() { # clam_workers ENGINE
   elif [ "$1" = clamd ]; then clamd_auto_workers; else clam_auto_workers; fi
 }
 
+# maldet dauerhaft von den ClamAV-Ordnern fernhalten. Auch mit scan_clamscan=0 kopiert maldet bei jedem
+# Signatur-Update (alle 6 Stunden per cron) seine rfxn-Dateien nach /var/lib/clamav und lädt clamd neu – und der
+# nächste Scan räumt sie wieder weg. Dieses Hin und Her kann clamd beim (Neu-)Start erwischen. /etc/default/maldet
+# lädt maldet zuletzt, und Updates von maldet lassen die Datei stehen.
+maldet_isolate() {
+  local f=/etc/default/maldet tmp
+  [ -d /usr/local/maldetect ] || return 0
+  tmp=$(mktemp)
+  { [ -f "$f" ] && sed '/^# >>> ubusec/,/^# <<< ubusec/d' "$f"
+    printf '# >>> ubusec – maldet prüft mit eigener Routine und verändert die ClamAV-Ordner nicht\nscan_clamscan="0"\nclamav_paths=""\n# <<< ubusec\n'
+  } >"$tmp"
+  if cmp -s "$tmp" "$f"; then rm -f "$tmp"; else install -m 644 "$tmp" "$f"; rm -f "$tmp"; fi
+}
+
 # Signaturen von Linux Malware Detect aus den ClamAV-Ordnern räumen. ubusec lässt maldet seit 1.5.17 mit eigener
 # Prüfroutine laufen; übrig gebliebene rfxn-Dateien (unlesbar, verwaister Verweis, halb gelöscht) bringen clamd
 # beim Start zum Absturz – dann hängt auch die Virenprüfung eingehender Mails.
@@ -1423,7 +1437,7 @@ mod_malware() {
     freshclam --quiet >"$RAW/freshclam.log" 2>&1 || add NIEDRIG malware "ClamAV-Signaturupdate fehlgeschlagen" "Log: $RAW/freshclam.log"
   fi
   # (Alter der Signaturen prüft der Bereich „Prüfwerkzeuge“)
-  have maldet && clam_rfxn_cleanup
+  if have maldet; then maldet_isolate; clam_rfxn_cleanup; fi
   clamd_health
 
   # 1. Dateiliste erstellen – mit allen Ausnahmen, ohne Netzlaufwerke und Pseudo-Dateisysteme
@@ -2213,6 +2227,7 @@ do_uninstall() {
         /etc/systemd/system/ubusec-queue.{path,service} /etc/systemd/system/ubusec-ctl.{path,service} "$INSTALL_PATH"
   rm -rf /etc/systemd/system/ubusec-{quick,full}.timer.d /usr/local/lib/ubusec/checks
   rm -rf "$WEB_DIR" /etc/needrestart/conf.d/ubusec.conf
+  [ -f /etc/default/maldet ] && sed -i '/^# >>> ubusec/,/^# <<< ubusec/d' /etc/default/maldet
   systemctl daemon-reload
   echo "ubusec entfernt. Konfiguration ($CONF_DIR), Daten ($STATE_DIR) und Berichte ($LOG_DIR) blieben erhalten."
 }
@@ -2374,6 +2389,7 @@ install_optional() { # install_optional aide|maldet
           echo "Heruntergeladen: $MALDET_URL ($(sha256sum "$tmp/maldet.tgz" | cut -c1-16)…)"
           (cd "$d" && ./install.sh) | tail -5
           apt-get install -y -q yara >/dev/null 2>&1 && echo "yara installiert (für die YARA-Regeln von maldet)"
+          maldet_isolate
           local conf=/usr/local/maldetect/conf.maldet
           if [ -f "$conf" ]; then
             # ubusec ruft maldet selbst auf: kein eigener täglicher Scan, keine Mails, nichts automatisch in Quarantäne;
