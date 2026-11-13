@@ -212,7 +212,17 @@ write_status() { # write_status running modul index total [exitcode report]
 # ============================================================================
 #  MODUL: updates – ausstehende Updates, Neustarts, Support-Status
 # ============================================================================
+needrestart_exclude() { # needrestart soll ubusec nicht neu starten: Ein Neustart des laufenden Scans (Typ oneshot)
+  # blockiert den ganzen Neustart-Befehl – und damit apt/unattended-upgrades – bis der Scan fertig ist
+  local f=/etc/needrestart/conf.d/ubusec.conf
+  [ -d /etc/needrestart/conf.d ] || return 0
+  [ -f "$f" ] && return 0
+  printf '# von ubusec – ubusec-Dienste nie automatisch neu starten (ein laufender Scan würde den Neustart blockieren)\n$nrconf{override_rc}{qr(^ubusec)} = 0;\n' >"$f"
+  chmod 644 "$f"
+}
+
 mod_updates() {
+  needrestart_exclude
   apt-get update -qq >"$RAW/apt-update.log" 2>&1 \
     || add NIEDRIG updates "apt-get update fehlgeschlagen – Update-Daten evtl. veraltet" "Log: $RAW/apt-update.log"
 
@@ -1328,8 +1338,44 @@ clamd_auto_workers() {
   echo "$n"
 }
 clam_workers() { # clam_workers ENGINE
-  if [ "${CLAM_PARALLEL:-0}" -gt 0 ] 2>/dev/null; then echo "$CLAM_PARALLEL"
+  if [ "${CLAM_PARALLEL:-0}" -gt 0 ] 2>/dev/null; then
+    local n=$CLAM_PARALLEL mt
+    # auch bei fester Zahl: zwei Threads des Dienstes bleiben für eingehende Mails und Uploads frei
+    if [ "$1" = clamd ]; then mt=$(clamd_conf MaxThreads); mt=${mt:-10}; (( n > mt - 2 )) && n=$(( mt - 2 )); (( n < 1 )) && n=1; fi
+    echo "$n"
   elif [ "$1" = clamd ]; then clamd_auto_workers; else clam_auto_workers; fi
+}
+
+# Signaturen von Linux Malware Detect aus den ClamAV-Ordnern räumen. ubusec lässt maldet seit 1.5.17 mit eigener
+# Prüfroutine laufen; übrig gebliebene rfxn-Dateien (unlesbar, verwaister Verweis, halb gelöscht) bringen clamd
+# beim Start zum Absturz – dann hängt auch die Virenprüfung eingehender Mails.
+clam_rfxn_cleanup() {
+  local d f gone=()
+  for d in /var/lib/clamav /usr/local/share/clamav /var/clamav; do
+    [ -d "$d" ] || continue
+    for f in "$d"/rfxn.hdb "$d"/rfxn.ndb "$d"/rfxn.yara "$d"/rfxn.hsb "$d"/lmd.user.*; do
+      [ -e "$f" ] || [ -L "$f" ] || continue
+      rm -f "$f" && gone+=("$f")
+    done
+  done
+  (( ${#gone[@]} )) && log "   maldet-Signaturen aus dem ClamAV-Ordner entfernt: ${gone[*]}"
+  return 0
+}
+
+# Läuft der ClamAV-Dienst wirklich? Erkennt eine Neustart-Schleife (z. B. kaputte Signaturdatei) und einen hängenden Dienst
+clamd_health() {
+  systemctl is-enabled -q clamav-daemon 2>/dev/null || return 0
+  local nr err
+  nr=$(systemctl show clamav-daemon -p NRestarts --value 2>/dev/null)
+  if clamd_usable; then
+    (( ${nr:-0} > 5 )) && add NIEDRIG malware "ClamAV-Dienst wurde seit dem Start ${nr}-mal neu gestartet" \
+      "Protokoll: journalctl -u clamav-daemon -n 50"
+    return 0
+  fi
+  err=$(journalctl -u clamav-daemon --since "-2h" --no-pager -q 2>/dev/null | grep -E "ERROR|Error" | tail -2 | sed 's/^.*clamd\[[0-9]*\]: //')
+  add HOCH malware "ClamAV-Dienst antwortet nicht – die Virenprüfung eingehender Mails und Uploads hängt" \
+    "Zustand: $(systemctl is-active clamav-daemon 2>/dev/null), Neustarts: ${nr:-?}" ${err:+"Letzter Fehler: $err"} \
+    "Mails bleiben dann in der Warteschlange (mailq) – nichts geht verloren, sie kommen nach der Behebung an"
 }
 
 CLAM_GONE_RX='No such file|lstat\(\) failed|File path check failure'
@@ -1360,8 +1406,11 @@ clamd_worker() { # clamd_worker ID TEILLISTE…
   local id=$1 p r cp=""; shift
   trap '[ -n "$cp" ] && kill "$cp" 2>/dev/null; exit 143' TERM
   for p in "$@"; do
-    nice -n 19 ionice -c3 clamdscan --fdpass --no-summary -f "$p" >>"$RAW/clam.out.$id" 2>>"$RAW/clam.err.$id" &
+    # Zeitlimit je Teilliste (500 Dateien): hängt der Dienst, wartet ubusec nicht stundenlang
+    nice -n 19 ionice -c3 timeout -k 30 "${CLAMD_PART_TIMEOUT:-1800}" clamdscan --fdpass --no-summary -f "$p" \
+      >>"$RAW/clam.out.$id" 2>>"$RAW/clam.err.$id" &
     cp=$!; r=0; wait "$cp" || r=$?; cp=""
+    (( r == 124 || r == 137 )) && echo "Zeitlimit für Teilliste $p erreicht" >>"$RAW/clam.err.$id"
     if (( r >= 2 )) && ! clamd_usable; then return 3; fi
     wc -l <"$p" >>"$RAW/clam.done.$id"
   done
@@ -1374,6 +1423,8 @@ mod_malware() {
     freshclam --quiet >"$RAW/freshclam.log" 2>&1 || add NIEDRIG malware "ClamAV-Signaturupdate fehlgeschlagen" "Log: $RAW/freshclam.log"
   fi
   # (Alter der Signaturen prüft der Bereich „Prüfwerkzeuge“)
+  have maldet && clam_rfxn_cleanup
+  clamd_health
 
   # 1. Dateiliste erstellen – mit allen Ausnahmen, ohne Netzlaufwerke und Pseudo-Dateisysteme
   local paths p roots=() prune=() e
@@ -1746,6 +1797,7 @@ WPAT
       fi
     done
     SUB_TEXT=""
+    clam_rfxn_cleanup
     local hits rep
     hits=$(grep -oE 'malware hits [0-9]+' "$RAW/maldet.txt" | grep -oE '[0-9]+' | awk '{s+=$1} END{print s+0}')
     rep=$(grep -oE 'maldet --report [0-9.-]+' "$RAW/maldet.txt" | tail -1)
@@ -2124,6 +2176,7 @@ do_install() {
   fi
   write_units
   [ -f "$SCHEDULE_FILE" ] || write_schedule
+  needrestart_exclude
   apply_schedule
   write_settings_json
   cat <<EOF
@@ -2159,7 +2212,7 @@ do_uninstall() {
   rm -f /etc/systemd/system/ubusec-{quick,full}.{service,timer} /etc/systemd/system/ubusec-web.service \
         /etc/systemd/system/ubusec-queue.{path,service} /etc/systemd/system/ubusec-ctl.{path,service} "$INSTALL_PATH"
   rm -rf /etc/systemd/system/ubusec-{quick,full}.timer.d /usr/local/lib/ubusec/checks
-  rm -rf "$WEB_DIR"
+  rm -rf "$WEB_DIR" /etc/needrestart/conf.d/ubusec.conf
   systemctl daemon-reload
   echo "ubusec entfernt. Konfiguration ($CONF_DIR), Daten ($STATE_DIR) und Berichte ($LOG_DIR) blieben erhalten."
 }

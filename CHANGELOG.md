@@ -4,6 +4,16 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.5.19 – 2026-11-13
 
+- **ClamAV-Dienst und Mailzustellung abgesichert** (nach einem Vorfall: eingehende Mails blieben stundenlang hängen):
+  - ubusec räumt übrig gebliebene Signaturdateien von Linux Malware Detect (`rfxn.*`) aus den ClamAV-Ordnern – vor
+    dem Virenscan und nach jedem maldet-Lauf. Eine unlesbare oder verwaiste `rfxn.ndb` ließ clamd beim Start abbrechen;
+    systemd startete ihn endlos neu, und die Virenprüfung eingehender Mails (Virtualmin) hing.
+  - Neue Meldung HOCH „ClamAV-Dienst antwortet nicht“ mit dem letzten Fehler aus dem Protokoll und einer Anleitung.
+  - needrestart startet die ubusec-Dienste nicht mehr neu (`/etc/needrestart/conf.d/ubusec.conf`). Ein Neustart des
+    laufenden Vollscans hatte den Neustart-Befehl – und damit das automatische Update – stundenlang blockiert.
+  - Zeitlimit je Teilliste beim Scan über den ClamAV-Dienst (30 Minuten), statt unbegrenzt zu warten.
+  - Auch bei fest eingestellter Zahl „Parallele Prüfungen“ bleiben zwei Threads des ClamAV-Dienstes für eingehende
+    Mails und Uploads frei.
 - **E-Mail: selektives Greylisting wird erkannt.** Wer postgrey nur für verdächtige Absender-Server aufruft (ohne
   Reverse-DNS oder mit IP-Adresse im Namen, über eine Restriction-Klasse), bekam bisher fälschlich „Greylisting läuft,
   ist aber nicht eingebunden“. Der Hinweis zum Greylisting nennt außerdem die Wege gegen verspätete Bestätigungscodes.

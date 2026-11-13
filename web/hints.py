@@ -875,6 +875,17 @@ _H = [
         why="Ohne dieses Werkzeug fehlt ein Teil der Prüfung.",
         steps=["$ sudo ubusec --install"], effort="5 Min")),
 
+    (r"^malware\|ClamAV-Dienst antwortet nicht", dict(
+        why="Virtualmin prüft eingehende Mails (und Nextcloud ggf. Uploads) über den ClamAV-Dienst. Antwortet er nicht, "
+            "bleibt jede Mail in der Zustellung hängen – sie liegt in der Warteschlange und kommt erst an, wenn der Dienst "
+            "wieder läuft. Häufige Ursache: eine kaputte oder unlesbare Signaturdatei, an der clamd beim Start abbricht "
+            "und von systemd endlos neu gestartet wird.",
+        steps=["Fehler ansehen: journalctl -u clamav-daemon -n 30 --no-pager",
+               "Bei „Can't open file … rfxn.*“ (Signaturen von Linux Malware Detect): sudo rm -f /var/lib/clamav/rfxn.* /var/lib/clamav/lmd.user.*",
+               "$ sudo systemctl reset-failed clamav-daemon && sudo systemctl restart clamav-daemon",
+               "Nach 30–60 Sekunden prüfen: timeout 30 clamdscan /etc/os-release – muss „OK“ melden.",
+               "Hängende Mailprüfungen beenden und Zustellung anstoßen: sudo pkill -f clam-wrapper.pl; sudo postqueue -f"],
+        effort="15 Min")),
     # ---------------------------------------------------------------- mail ---
     (r"^mail\|Server könnte als offenes Relay", dict(
         why="Ohne reject_unauth_destination nimmt Postfix womöglich Mails von jedem für jeden an und leitet sie weiter. "
