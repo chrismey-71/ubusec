@@ -557,9 +557,20 @@ _H = [
         why="TLS 1.0 und 1.1 gelten als unsicher und werden von aktuellen Browsern nicht mehr verwendet.",
         steps=["In /etc/apache2/mods-available/ssl.conf: SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1",
                "$ sudo apache2ctl configtest && sudo systemctl reload apache2"], effort="5 Min")),
+    (r"^sites\|HTTP leitet nicht auf HTTPS um – Hostname des Server-Anbieters", dict(
+        why="Der Server-Hostname aus der Zone des Anbieters (z. B. v22….ultrasrv.de) liefert eine Seite über HTTP aus. "
+            "Wird er nicht als Website genutzt, ist das unkritisch.",
+        steps=["Nichts zu tun, wenn unter diesem Namen keine Inhalte liegen.",
+               "Sonst wie bei jeder Domain umleiten: sudo virtualmin modify-web --domain HOSTNAME --ssl-redirect"],
+        effort="—")),
     (r"^sites\|HTTP leitet nicht auf HTTPS um", dict(
         why="Wer die Adresse ohne https:// eintippt, landet auf der unverschlüsselten Seite.",
-        steps=["Virtualmin: Domain → Web Configuration → Website Redirects → „Redirect all requests to SSL site“ aktivieren"],
+        steps=["$ sudo virtualmin modify-web --domain DOMAIN --ssl-redirect",
+               "Prüfen: curl -sI http://DOMAIN/ | head -3 – erwartet: 301 und „Location: https://…“",
+               "In der Virtualmin-Oberfläche (je nach Version): Domain wählen → Web Configuration → Website Redirects → "
+               "„Add a new website redirect“: Quelle /, Ziel https://DOMAIN/, Weiterleitung nur für HTTP (nicht für SSL) – "
+               "oder unter Web Configuration → Website Options die Option „Redirect HTTP to HTTPS“, falls vorhanden.",
+               "Zurück: sudo virtualmin modify-web --domain DOMAIN --no-ssl-redirect"],
         effort="5 Min")),
     (r"^sites\|(HSTS|X-Content-Type-Options|Schutz vor Einbettung|Referrer-Policy|Permissions-Policy)", dict(
         why="Sicherheits-Header weisen den Browser an, sich besser zu schützen: nur HTTPS verwenden (HSTS), Dateitypen nicht "
@@ -638,8 +649,9 @@ _H = [
         effort="5 Min")),
     (r"^sites\|Kein SPF-Eintrag", dict(
         why="Ohne SPF kann jeder E-Mails mit deiner Domain als Absender verschicken, und deine echten Mails landen eher im Spam.",
-        steps=["DNS-TXT-Eintrag für die Domain anlegen, z. B.: v=spf1 mx a -all",
-               "Virtualmin: Domain → DNS Settings → SPF Record (erzeugt den Eintrag automatisch)",
+        steps=["ubusec prüft die Einträge, die im Internet sichtbar sind (abgefragt über einen öffentlichen DNS-Resolver), nicht die Virtualmin-Zone. Liegt das DNS der Domain beim Anbieter (z. B. netcup), den Eintrag dort anlegen – die Virtualmin-Zone gilt nur, wenn die Nameserver der Domain auf diesen Server zeigen.",
+               "DNS-TXT-Eintrag für die Domain anlegen, z. B.: v=spf1 mx a -all",
+               "Liegt das DNS auf diesem Server: Virtualmin → Domain → DNS Settings → SPF Record (erzeugt den Eintrag automatisch)",
                "Externe Absender (Newsletter, Mailprovider) mit include: ergänzen."], effort="15 Min")),
     (r"^sites\|Mehrere SPF-Einträge", dict(
         why="Mehrere SPF-Einträge machen SPF komplett ungültig – Empfänger werten ihn als Fehler.",
@@ -659,14 +671,16 @@ _H = [
         effort="15 Min")),
     (r"^sites\|Kein DMARC-Eintrag", dict(
         why="DMARC sagt Empfängern, was mit Mails passieren soll, die SPF/DKIM nicht bestehen, und liefert dir Berichte über Missbrauch.",
-        steps=["DNS-TXT-Eintrag _dmarc.<domain> anlegen: v=DMARC1; p=none; rua=mailto:dmarc@<domain>",
+        steps=["ubusec prüft die Einträge, die im Internet sichtbar sind (abgefragt über einen öffentlichen DNS-Resolver), nicht die Virtualmin-Zone. Liegt das DNS der Domain beim Anbieter (z. B. netcup), den Eintrag dort anlegen – die Virtualmin-Zone gilt nur, wenn die Nameserver der Domain auf diesen Server zeigen.",
+               "DNS-TXT-Eintrag _dmarc.<domain> anlegen: v=DMARC1; p=none; rua=mailto:dmarc@<domain>",
                "Nach zwei bis vier Wochen Berichte prüfen, dann p=quarantine und später p=reject."], effort="15 Min")),
     (r"^sites\|DMARC nur im Beobachtungsmodus", dict(
         why="Mit p=none werden gefälschte Mails nur gemeldet, aber zugestellt.",
         steps=["Wenn die DMARC-Berichte keine legitimen Fehlschläge zeigen: p=quarantine, später p=reject."], effort="15 Min")),
     (r"^sites\|Kein CAA-Eintrag", dict(
         why="Ein CAA-Eintrag legt fest, welche Zertifizierungsstellen Zertifikate für die Domain ausstellen dürfen.",
-        steps=["DNS-Eintrag vom Typ CAA anlegen: 0 issue \"letsencrypt.org\"",
+        steps=["ubusec prüft die Einträge, die im Internet sichtbar sind (abgefragt über einen öffentlichen DNS-Resolver), nicht die Virtualmin-Zone. Liegt das DNS der Domain beim Anbieter (z. B. netcup), den Eintrag dort anlegen – die Virtualmin-Zone gilt nur, wenn die Nameserver der Domain auf diesen Server zeigen.",
+               "DNS-Eintrag vom Typ CAA anlegen: 0 issue \"letsencrypt.org\"",
                "Gilt automatisch auch für Subdomains."], effort="5 Min")),
     (r"^sites\|Domain nicht auflösbar", dict(
         why="Die Domain ist in Virtualmin angelegt, zeigt aber nicht (mehr) auf diesen Server.",
@@ -890,6 +904,18 @@ _H = [
                "dabei in der Warteschlange und werden neu zugestellt (schlimmstenfalls doppelt, nie verloren).",
                "Vorbeugend in Virtualmin: Email Settings → Spam and Virus Delivery → Virus-Mails in einen Ordner "
                "(z. B. Maildir/.Virus/) statt löschen – Fehlalarme lassen sich dann zurückholen."],
+        effort="15 Min")),
+    (r"^rootkit\|chkrootkit \(chkwtmp\)", dict(
+        why="/var/log/wtmp verzeichnet jede Anmeldung. chkwtmp findet Einträge, die mit Nullen überschrieben sind – das, was "
+            "Werkzeuge zum Spurenverwischen hinterlassen. Viel häufiger ist die Ursache aber harmlos: ein Absturz oder Neustart "
+            "während einer Anmeldung, oder Daten, die bei einem Umzug oder einer Wiederherstellung übernommen wurden. "
+            "ubusec zeigt deshalb die Anmeldungen und Neustarts im selben Zeitraum und das Systemprotokoll dazu.",
+        steps=["Passt der Zeitraum zu einer Anmeldung von dir, einem Neustart oder liegt er vor der Einrichtung des Servers: "
+               "harmlos – mit „Ausblenden“ als Fehlalarm markieren.",
+               "Anmeldungen ansehen: last -F -x -f /var/log/wtmp (ältere Monate: -f /var/log/wtmp.1)",
+               "Der Inhalt des gelöschten Eintrags (wer, von wo) lässt sich nicht wiederherstellen – nur das Umfeld.",
+               "Gibt es in diesem Zeitraum eine Anmeldung, die nicht von dir stammt: Passwörter und SSH-Schlüssel prüfen, "
+               "authorized_keys aller Benutzer ansehen, rkhunter und Datei-Integrität (AIDE) beachten."],
         effort="15 Min")),
     # ---------------------------------------------------------------- mail ---
     (r"^mail\|Server könnte als offenes Relay", dict(

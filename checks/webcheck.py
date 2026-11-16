@@ -400,7 +400,11 @@ def check_domain(domain, vh, full):
     if r80 is not None:
         loc = r80.h("location")
         if not (r80.status in (301, 302, 307, 308) and loc.startswith("https://")):
-            agg("MITTEL", "HTTP leitet nicht auf HTTPS um ({domains})", "%s (HTTP %d)" % (domain, r80.status))
+            if provider_host(domain):
+                agg("INFO", "HTTP leitet nicht auf HTTPS um – Hostname des Server-Anbieters ({domains})",
+                    "%s (HTTP %d) – wird er nicht genutzt, ist das unkritisch" % (domain, r80.status))
+            else:
+                agg("MITTEL", "HTTP leitet nicht auf HTTPS um ({domains})", "%s (HTTP %d)" % (domain, r80.status))
 
     # --- Startseite und Header (einer Weiterleitung auf dieselbe Domain folgen) ---
     r = fetch(domain, ip, "/")
@@ -527,6 +531,34 @@ def dig(name, rtype):
     return lines
 
 
+PUBLIC_RESOLVERS = ("1.1.1.1", "9.9.9.9")
+_PUB_OK = []
+
+
+def dig_pub(name, rtype):
+    """Wie dig(), aber über einen öffentlichen Resolver – also das, was die Welt sieht. Wichtig, wenn der Server sich
+    selbst als Resolver nutzt (z. B. BIND für Spamhaus): Dann kämen sonst die lokalen Virtualmin-Zonen zurück statt der
+    Einträge beim DNS-Anbieter. Ist kein öffentlicher Resolver erreichbar, gilt der des Servers."""
+    if not _PUB_OK:
+        srv = next((s for s in PUBLIC_RESOLVERS if dig_status(".", "NS", s)[0] == "NOERROR"), "")
+        _PUB_OK.append(srv)
+    srv = _PUB_OK[0]
+    if not srv:
+        return dig(name, rtype)
+    rc, out, _ = run(["dig", "@" + srv, "+short", "+time=3", "+tries=2", rtype, name], timeout=20)
+    if rc != 0:
+        return dig(name, rtype)
+    lines = [l.strip() for l in out.splitlines() if l.strip() and not l.startswith(";")]
+    if rtype == "TXT":
+        return ["".join(re.findall(r'"((?:[^"\\]|\\.)*)"', l)) or l for l in lines]
+    return lines
+
+
+def provider_host(name):
+    """Hostname aus der Zone des Server-Anbieters (z. B. v22….ultrasrv.de) – dessen DNS verwaltet der Anbieter."""
+    return any(name == z or name.endswith("." + z) for z in PROVIDER_ZONES)
+
+
 def dig_status(name, rtype, server=None, cd=False):
     """(Status, Antworten) einer DNS-Abfrage, z. B. ("NOERROR", [...]) oder ("SERVFAIL", [])."""
     cmd = ["dig", "+time=3", "+tries=2", "+noall", "+comments", "+answer", rtype, name]
@@ -563,7 +595,7 @@ def zone_apex(name):
     parts = name.split(".")
     for i in range(len(parts) - 1):
         cand = ".".join(parts[i:])
-        if dig(cand, "SOA"):
+        if dig_pub(cand, "SOA"):
             return cand
     return ".".join(parts[-2:])
 
@@ -604,7 +636,7 @@ def check_dns(domains):
     info = {}
     apexes = {}
     for d in domains:
-        a = zone_apex(d)
+        a = next((z for z in PROVIDER_ZONES if d == z or d.endswith("." + z)), None) or zone_apex(d)
         apexes.setdefault(a, []).append(d)
     for apex in sorted(apexes):
         if apex in PROVIDER_ZONES:
@@ -612,10 +644,10 @@ def check_dns(domains):
                 "%s – SPF, DMARC und CAA verwaltet der Anbieter" % ", ".join(apexes[apex]))
             continue
         check_public_resolution(apex)
-        mx = dig(apex, "MX")
-        txt = dig(apex, "TXT")
+        mx = dig_pub(apex, "MX")
+        txt = dig_pub(apex, "TXT")
         spf = [t for t in txt if t.lower().startswith("v=spf1")]
-        dm = [t for t in dig("_dmarc." + apex, "TXT") if t.lower().startswith("v=dmarc1")]
+        dm = [t for t in dig_pub("_dmarc." + apex, "TXT") if t.lower().startswith("v=dmarc1")]
         pol = None
         if dm:
             m = re.search(r"\bp=(\w+)", dm[0], re.I)
@@ -644,7 +676,7 @@ def check_dns(domains):
         missing = []
         for d in apexes[apex]:
             parts = d.split(".")
-            if not any(dig(".".join(parts[i:]), "CAA") for i in range(len(parts) - 1)):
+            if not any(dig_pub(".".join(parts[i:]), "CAA") for i in range(len(parts) - 1)):
                 missing.append(d)
         if missing:
             subs = [d for d in missing if d != apex]
@@ -1801,7 +1833,7 @@ def check_dkim(conf, domains):
     for d in sorted(set(domains)):
         if signed and d not in signed:
             continue
-        if not any("v=dkim1" in t.lower() or "p=" in t for t in dig("%s._domainkey.%s" % (sel, d), "TXT")):
+        if not any("v=dkim1" in t.lower() or "p=" in t for t in dig_pub("%s._domainkey.%s" % (sel, d), "TXT")):
             agg("MITTEL", "DKIM-Schlüssel fehlt im DNS ({domains})",
                 "%s – TXT-Eintrag %s._domainkey.%s anlegen (Wert: Virtualmin → Email Settings → DKIM)" % (d, sel, d))
 

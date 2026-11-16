@@ -378,6 +378,95 @@ def proc_check(pid, debs):
         comm, pid, exe, pkg, "VERÄNDERT" if changed else "unverändert", known)
 
 
+WTMP_RX = re.compile(r"(\d+) deletion\(s\) between (\w{3} \w{3} +\d+ [\d:]{8} \d{4}) and (\w{3} \w{3} +\d+ [\d:]{8} \d{4})")
+LAST_RX = re.compile(r"^(\S+)\s+(\S+)\s+(.*?)\s*(\w{3} \w{3} +\d+ [\d:]{8} \d{4})(?: - (\w{3} \w{3} +\d+ [\d:]{8} \d{4}|.*))?")
+
+
+def _ptime(s):
+    import datetime
+    try:
+        return datetime.datetime.strptime(re.sub(r" +", " ", s.strip()), "%a %b %d %H:%M:%S %Y")
+    except ValueError:
+        return None
+
+
+def wtmp_analysis(items):
+    """chkwtmp meldet genullte Einträge in /var/log/wtmp. Umfeld zeigen und bewerten: Wer war angemeldet, gab es
+    einen Neustart (häufigste harmlose Ursache), was steht in den Protokollen?"""
+    import datetime
+    findings = []
+    lastlines = []
+    for f in sorted(glob.glob("/var/log/wtmp*")):
+        if f.endswith((".gz", ".xz")):
+            continue
+        lastlines += run(["last", "-F", "-x", "-w", "-f", f], 60)[1].splitlines()
+    try:
+        installed = datetime.datetime.fromtimestamp(min(os.stat(p).st_mtime for p in ("/var/log/installer", "/etc/machine-id") if os.path.exists(p)))
+    except ValueError:
+        installed = None
+    now = datetime.datetime.now()
+    for it in items:
+        m = WTMP_RX.search(it)
+        if not m:
+            continue
+        n, t0, t1 = int(m.group(1)), _ptime(m.group(2)), _ptime(m.group(3))
+        if not t0 or not t1:
+            continue
+        near, boots = [], []
+        lo, hi = t0 - datetime.timedelta(minutes=30), t1 + datetime.timedelta(minutes=30)
+        for l in lastlines:
+            lm = LAST_RX.match(l)
+            if not lm:
+                continue
+            st = _ptime(lm.group(4))
+            en = _ptime(lm.group(5)) if lm.group(5) and re.match(r"\w{3} ", lm.group(5)) else None
+            if not st:
+                continue
+            if lm.group(1) in ("reboot", "shutdown"):
+                if abs((st - t0).total_seconds()) < 900 or abs((st - t1).total_seconds()) < 900:
+                    boots.append("%s %s" % (lm.group(1), st.strftime("%d.%m.%Y %H:%M")))
+                continue
+            if lo <= st <= hi or (en and st <= t1 and en >= t0):
+                near.append("%s von %s (%s) %s–%s" % (lm.group(1), lm.group(3) or "lokal", lm.group(2),
+                            st.strftime("%d.%m. %H:%M"), en.strftime("%H:%M") if en else "?"))
+        since, until = (t0 - datetime.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"), \
+            (t1 + datetime.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+        logs = [l for l in run(["journalctl", "-q", "--no-pager", "-o", "short", "--since", since, "--until", until,
+                                "-t", "sshd", "-t", "sshd-session", "-t", "sudo", "-t", "su", "-t", "systemd-logind",
+                                "-t", "login", "-t", "kernel"], 60)[1].splitlines() if l.strip()]
+        haslog = bool(run(["journalctl", "-q", "--no-pager", "-n", "1", "--since", since, "--until", until], 30)[1].strip())
+        sus = [l for l in logs if re.search(r"Accepted|session opened|COMMAND=|Failed password|Invalid user", l)]
+        age = (now - t1).days
+        when = "%s bis %s" % (t0.strftime("%d.%m.%Y %H:%M:%S"), t1.strftime("%H:%M:%S"))
+        det = ["%d gelöschte(r) Anmelde-Eintrag/Einträge (%s, vor %d Tagen)" % (n, when, age)]
+        if near:
+            det += ["Anmeldungen in diesem Zeitraum laut wtmp:"] + near[:6]
+        else:
+            det.append("Keine anderen Anmeldungen in diesem Zeitraum in wtmp")
+        if boots:
+            det.append("Neustart/Herunterfahren direkt daneben: " + ", ".join(boots[:3]))
+        if sus:
+            det += ["Aus dem Systemprotokoll:"] + [re.sub(r"^\S+ \S+ \S+ \S+ ", "", l)[:180] for l in sus[:6]]
+        elif not haslog:
+            det.append("Das Systemprotokoll reicht nicht so weit zurück – der Vorgang lässt sich nicht mehr nachvollziehen")
+        else:
+            det.append("Im Systemprotokoll keine Anmeldung und kein sudo in diesem Zeitraum")
+        if installed and t1 < installed:
+            sev, why = "INFO", "liegt vor der Installation dieses Systems (%s) – stammt aus übernommenen Daten" % installed.strftime("%d.%m.%Y")
+        elif boots:
+            sev, why = "NIEDRIG", "fällt mit einem Neustart zusammen – ein Absturz oder Neustart während einer Anmeldung hinterlässt typischerweise einen leeren Eintrag"
+        elif sus:
+            sev, why = "MITTEL", "in diesem Zeitraum gab es Anmeldungen – bitte prüfen, ob sie von dir stammen"
+        elif age > 30:
+            sev, why = "NIEDRIG", "liegt lange zurück, keine weiteren Auffälligkeiten"
+        else:
+            sev, why = "MITTEL", "nicht erklärbar – bitte prüfen"
+        det.append("Bewertung: " + why)
+        det.append("Selbst ansehen: last -F -x -f /var/log/wtmp | grep '%s'" % t0.strftime("%b %e").replace("  ", " "))
+        findings.append((sev, "chkrootkit (chkwtmp): gelöschter Anmelde-Eintrag am %s" % t0.strftime("%d.%m.%Y %H:%M"), det))
+    return findings
+
+
 def chk_classify(infile, outfile):
     """chkrootkit-Abschnitte („WARNING: …“) einzeln bewerten und als Befunde ausgeben (F/D-Zeilen)."""
     lines = [l.rstrip("\n") for l in open(infile, errors="replace")]
@@ -469,6 +558,12 @@ def chk_classify(infile, outfile):
                          [r[1] for r in res] + ["chkrootkit meldet jedes Programm mit Rohzugriff aufs Netzwerk; DHCP-Dienste brauchen das"])
                 elif res:
                     emit("KRITISCH" if "bad" in st else "MITTEL", "chkrootkit „Packet Sniffer“: Programm genauer prüfen", [r[1] for r in res])
+            elif head.startswith("Output from chkwtmp"):
+                res = wtmp_analysis(items)
+                for sev, msg, det in res:
+                    emit(sev, msg, det)
+                if not res:
+                    emit("MITTEL", "chkrootkit: " + head[:150], items or ["(ohne weitere Angaben)"])
             else:
                 emit("MITTEL", "chkrootkit: " + head[:150], items or ["(ohne weitere Angaben)"])
         if rest:

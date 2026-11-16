@@ -2,6 +2,19 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.20 – 2026-11-16
+
+- **chkrootkit „chkwtmp“ wird erklärt.** Statt nur „1 deletion(s) between …“ zeigt ubusec, wer in diesem Zeitraum
+  angemeldet war, ob ein Neustart daneben liegt und was im Systemprotokoll steht. Bewertet wird nach Ursache: vor der
+  Einrichtung des Servers (übernommene Daten) INFO, mit Neustart NIEDRIG, mit Anmeldungen im Zeitraum MITTEL.
+- **DNS-Prüfungen sehen, was das Internet sieht.** SPF, DMARC, CAA, MX und DKIM werden jetzt über einen öffentlichen
+  Resolver (1.1.1.1, ersatzweise 9.9.9.9) abgefragt. Nutzt der Server sich selbst als Resolver (z. B. BIND für
+  Spamhaus), kamen bisher die lokalen Virtualmin-Zonen zurück statt der Einträge beim DNS-Anbieter.
+- **Hostnamen des Server-Anbieters** (z. B. v22….ultrasrv.de) werden in den DNS-Prüfungen immer übersprungen, auch wenn
+  Virtualmin für sie eine eigene Zone angelegt hat; fehlende HTTPS-Weiterleitung dort ist nur noch INFO.
+- **Hinweis zur HTTPS-Weiterleitung** nennt den Befehl `virtualmin modify-web --domain … --ssl-redirect` und den Weg
+  über die Oberfläche, der in aktuellen Virtualmin-Versionen tatsächlich existiert.
+
 ## 1.5.19 – 2026-11-13
 
 - **ClamAV-Dienst und Mailzustellung abgesichert** (nach einem Vorfall: eingehende Mails blieben stundenlang hängen):
