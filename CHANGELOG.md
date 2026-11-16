@@ -2,6 +2,12 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.21 – 2026-11-16
+
+- Hinweis zum Greylisting: Beim selektiven Greylisting über `check_reverse_client_hostname_access` sucht Postfix auch
+  nach der nackten IP-Adresse. Eine Regel „IP-Adresse im Namen“ greift dann bei jedem Server – der Hinweis zeigt, wie
+  man IP-Schlüssel mit `DUNNO` ausnimmt.
+
 ## 1.5.20 – 2026-11-16
 
 - **chkrootkit „chkwtmp“ wird erklärt.** Statt nur „1 deletion(s) between …“ zeigt ubusec, wer in diesem Zeitraum
