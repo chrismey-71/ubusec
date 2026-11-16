@@ -981,7 +981,8 @@ _H = [
                "Hinweis: erste Mails neuer Absender kommen 5 bis 15 Minuten später an – Bestätigungscodes können dann "
                "abgelaufen sein. Abhilfe: Wartezeit senken (--delay=60 in /etc/default/postgrey) oder nur verdächtige "
                "Server greylisten (ohne Reverse-DNS oder mit IP im Namen) über eine Restriction-Klasse und "
-               "check_reverse_client_hostname_access."],
+               "check_reverse_client_hostname_access. Achtung: Postfix sucht dabei auch nach der nackten IP-Adresse – "
+               "IP-Schlüssel in der Liste zuerst mit DUNNO ausnehmen (/^[0-9.]+$/ DUNNO), sonst wird jeder Server gegreylistet."],
         effort="5 Min")),
     (r"^mail\|Kein Greylisting", dict(
         why="Greylisting weist Mails unbekannter Absender beim ersten Versuch vorübergehend ab. Echte Mailserver "
