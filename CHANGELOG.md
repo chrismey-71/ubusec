@@ -4,6 +4,8 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.5.21 – 2026-11-17
 
+- Hinweis zu Dovecot nennt zuerst die Einstellung für Dovecot 2.4 (`auth_allow_cleartext`, Ubuntu 26.04) und
+  `disable_plaintext_auth` nur noch für 2.3.
 - Hinweis zur HTTPS-Weiterleitung korrigiert: Virtualmin kennt kein `modify-web --ssl-redirect`. Richtig ist
   `virtualmin create-redirect --domain … --path / --redirect https://…/ --http --code 301 --fix-wellknown`.
 - Hinweis zum Greylisting: Beim selektiven Greylisting über `check_reverse_client_hostname_access` sucht Postfix auch

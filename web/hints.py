@@ -960,8 +960,12 @@ _H = [
                "Alternativ myhostname auf den Namen im Zertifikat setzen – muss zum Reverse-DNS passen."], effort="15 Min")),
     (r"^mail\|Dovecot \(IMAP/POP3\) ohne Verschlüsselung|^mail\|Dovecot erlaubt Passwörter ohne", dict(
         why="Postfach-Passwörter können beim Abrufen der Mails im Klartext übertragen werden.",
-        steps=["In /etc/dovecot/conf.d/10-ssl.conf: ssl = required",
-               "In /etc/dovecot/conf.d/10-auth.conf: disable_plaintext_auth = yes (Dovecot 2.4: auth_allow_cleartext = no)",
+        steps=["Version ansehen: dovecot --version (Ubuntu 26.04: Dovecot 2.4; bis Ubuntu 24.04: 2.3)",
+               "In /etc/dovecot/conf.d/10-ssl.conf: ssl = required",
+               "Dovecot 2.4: auth_allow_cleartext = no – ist dort schon die Voreinstellung; die Stelle mit „yes“ finden: "
+               "grep -rn auth_allow_cleartext /etc/dovecot/",
+               "Dovecot 2.3: disable_plaintext_auth = yes in /etc/dovecot/conf.d/10-auth.conf (unter 2.4 unbekannt – "
+               "Dovecot startet dann nicht)",
                "$ sudo doveconf -n >/dev/null && sudo systemctl reload dovecot"], effort="15 Min")),
     (r"^mail\|Kein Spamfilter", dict(
         why="Ohne Spamfilter landet jede Werbe- und Betrugsmail direkt im Posteingang der Nutzer.",
