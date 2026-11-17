@@ -561,16 +561,20 @@ _H = [
         why="Der Server-Hostname aus der Zone des Anbieters (z. B. v22….ultrasrv.de) liefert eine Seite über HTTP aus. "
             "Wird er nicht als Website genutzt, ist das unkritisch.",
         steps=["Nichts zu tun, wenn unter diesem Namen keine Inhalte liegen.",
-               "Sonst wie bei jeder Domain umleiten: sudo virtualmin modify-web --domain HOSTNAME --ssl-redirect"],
+               "Sonst wie bei jeder Domain umleiten: sudo virtualmin create-redirect --domain HOSTNAME --path / "
+               "--redirect https://HOSTNAME/ --http --code 301 --fix-wellknown"],
         effort="—")),
     (r"^sites\|HTTP leitet nicht auf HTTPS um", dict(
         why="Wer die Adresse ohne https:// eintippt, landet auf der unverschlüsselten Seite.",
-        steps=["$ sudo virtualmin modify-web --domain DOMAIN --ssl-redirect",
-               "Prüfen: curl -sI http://DOMAIN/ | head -3 – erwartet: 301 und „Location: https://…“",
-               "In der Virtualmin-Oberfläche (je nach Version): Domain wählen → Web Configuration → Website Redirects → "
-               "„Add a new website redirect“: Quelle /, Ziel https://DOMAIN/, Weiterleitung nur für HTTP (nicht für SSL) – "
-               "oder unter Web Configuration → Website Options die Option „Redirect HTTP to HTTPS“, falls vorhanden.",
-               "Zurück: sudo virtualmin modify-web --domain DOMAIN --no-ssl-redirect"],
+        steps=["$ sudo virtualmin create-redirect --domain DOMAIN --path / --redirect https://DOMAIN/ --http --code 301 --fix-wellknown",
+               "--http: gilt nur für die unverschlüsselte Seite (sonst Endlosschleife); --fix-wellknown: Let's Encrypt "
+               "erreicht weiter /.well-known über HTTP; Unterseiten werden mitgenommen (/kontakt → https://DOMAIN/kontakt).",
+               "Kennt eine ältere Virtualmin-Version --code oder --fix-wellknown nicht, die Option weglassen.",
+               "Prüfen: curl -sI http://DOMAIN/kontakt | head -3 – erwartet: 301 und „Location: https://DOMAIN/kontakt“",
+               "In der Oberfläche: Domain wählen → Web Configuration → Website Redirects → „Add a new website redirect“: "
+               "Quelle /, Ziel https://DOMAIN/, nur für die Nicht-SSL-Website.",
+               "Ansehen und zurück: sudo virtualmin list-redirects --domain DOMAIN; "
+               "sudo virtualmin delete-redirect --domain DOMAIN --path /"],
         effort="5 Min")),
     (r"^sites\|(HSTS|X-Content-Type-Options|Schutz vor Einbettung|Referrer-Policy|Permissions-Policy)", dict(
         why="Sicherheits-Header weisen den Browser an, sich besser zu schützen: nur HTTPS verwenden (HSTS), Dateitypen nicht "

@@ -2,8 +2,10 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
-## 1.5.21 – 2026-11-16
+## 1.5.21 – 2026-11-17
 
+- Hinweis zur HTTPS-Weiterleitung korrigiert: Virtualmin kennt kein `modify-web --ssl-redirect`. Richtig ist
+  `virtualmin create-redirect --domain … --path / --redirect https://…/ --http --code 301 --fix-wellknown`.
 - Hinweis zum Greylisting: Beim selektiven Greylisting über `check_reverse_client_hostname_access` sucht Postfix auch
   nach der nackten IP-Adresse. Eine Regel „IP-Adresse im Namen“ greift dann bei jedem Server – der Hinweis zeigt, wie
   man IP-Schlüssel mit `DUNNO` ausnimmt.
