@@ -909,6 +909,17 @@ _H = [
                "Vorbeugend in Virtualmin: Email Settings → Spam and Virus Delivery → Virus-Mails in einen Ordner "
                "(z. B. Maildir/.Virus/) statt löschen – Fehlalarme lassen sich dann zurückholen."],
         effort="15 Min")),
+    (r"^apps\|Nextcloud-Update wird scheitern", dict(
+        why="Der Nextcloud-Updater ersetzt alle Programmdateien und läuft als Besitzer der Installation. Gehört eine Datei "
+            "einem anderen Benutzer (meist root, weil occ einmal ohne sudo -u ausgeführt wurde) oder ist sie schreibgeschützt, "
+            "bricht er mit „Check for write permissions failed“ ab. Typisch: die App Recognize packt ihre TensorFlow-"
+            "Bibliothek (libtensorflow…, tf_*.h) mit den Rechten 555 aus.",
+        steps=["Die Befehle aus den Details ausführen – erst den chown-Befehl (fremder Besitzer), dann den chmod-Befehl "
+               "(schreibgeschützt). Der Datenordner bleibt unberührt.",
+               "Danach das Update erneut starten: sudo -u BENUTZER php PFAD/updater/updater.phar",
+               "Vorbeugen: occ immer als Besitzer ausführen – sudo -u BENUTZER php PFAD/occ …, nie direkt als root.",
+               "Nach einem Update von Recognize kann der Schreibschutz wiederkommen – ubusec meldet es dann erneut."],
+        effort="5 Min")),
     (r"^rootkit\|chkrootkit \(chkwtmp\)", dict(
         why="/var/log/wtmp verzeichnet jede Anmeldung. chkwtmp findet Einträge, die mit Nullen überschrieben sind – das, was "
             "Werkzeuge zum Spurenverwischen hinterlassen. Viel häufiger ist die Ursache aber harmlos: ein Absturz oder Neustart "

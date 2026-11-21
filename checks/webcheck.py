@@ -21,6 +21,7 @@ import concurrent.futures as cf
 import datetime
 import fnmatch
 import glob
+import grp
 import http.client
 import ipaddress
 import json
@@ -29,6 +30,7 @@ import pwd
 import random
 import re
 import socket
+import stat
 import ssl
 import string
 import subprocess
@@ -1035,6 +1037,39 @@ def check_wordpress(path, vh):
     return {"path": path, "version": ver}
 
 
+def nc_unwritable(path, datadir):
+    """Dateien im Nextcloud-Programmordner, die der Updater nicht ersetzen kann: anderer Besitzer als config.php oder
+    ohne Schreibrecht für den Besitzer (z. B. die schreibgeschützt ausgepackte TensorFlow-Bibliothek der App Recognize).
+    Der Datenordner bleibt außen vor."""
+    try:
+        st = os.stat(os.path.join(path, "config", "config.php"))
+    except OSError:
+        return None
+    uid, skip = st.st_uid, os.path.realpath(datadir) if datadir else None
+    foreign, readonly, n = [], [], 0
+    for root, dirs, files in os.walk(path):
+        if skip and os.path.realpath(root) == skip:
+            dirs[:] = []
+            continue
+        dirs[:] = [d for d in dirs if not (skip and os.path.realpath(os.path.join(root, d)) == skip)]
+        for name in dirs + files:
+            p = os.path.join(root, name)
+            try:
+                ls = os.lstat(p)
+            except OSError:
+                continue
+            if stat.S_ISLNK(ls.st_mode):
+                continue
+            n += 1
+            if ls.st_uid != uid:
+                foreign.append(p)
+            elif not ls.st_mode & stat.S_IWUSR:
+                readonly.append(p)
+        if n > 400000:
+            break
+    return foreign, readonly
+
+
 def check_nextcloud(path, vh):
     site = url_for(path, vh)
     label = site[0] + (site[2] if site[2] != "/" else "") if site else path
@@ -1057,6 +1092,24 @@ def check_nextcloud(path, vh):
         x = fetch(site[0], site[1], site[2].rstrip("/") + "/" + rel + "/.ocdata", limit=1024)
         if x and x.status == 200:
             agg("KRITISCH", "Nextcloud: Datenverzeichnis öffentlich erreichbar", label)
+    res = nc_unwritable(path, dm.group(1) if dm else None)
+    if res and (res[0] or res[1]):
+        foreign, readonly = res
+        cu = owner(os.path.join(path, "config", "config.php")) or "?"
+        try:
+            cg = grp.getgrgid(os.stat(os.path.join(path, "config", "config.php")).st_gid).gr_name
+        except (OSError, KeyError):
+            cg = cu
+        prune = "-path %s -prune -o " % dm.group(1) if dm and os.path.realpath(dm.group(1)).startswith(os.path.realpath(path)) else ""
+        det = ["%s – %d Datei(en) mit fremdem Besitzer, %d ohne Schreibrecht für %s" % (label, len(foreign), len(readonly), cu)]
+        rel = lambda x: os.path.relpath(x, path)
+        if foreign:
+            det += ["fremder Besitzer: %s (%s)" % (rel(x), owner(x) or "?") for x in foreign[:4]]
+            det.append("Befehl: sudo find %s %s! -user %s -exec chown %s:%s {} +" % (path, prune, cu, cu, cg))
+        if readonly:
+            det += ["schreibgeschützt: %s" % rel(x) for x in readonly[:4]]
+            det.append("Befehl: sudo -u %s find %s %s! -writable ! -type l -exec chmod u+w {} +" % (cu, path, prune))
+        add("MITTEL", "Nextcloud-Update wird scheitern: Dateien im Programmordner nicht beschreibbar", *det)
     usr = owner(os.path.join(path, "occ"))
     if usr and usr != "root" and shutil_which("php"):
         rc, out, err = run(["php", "occ", "update:check"], timeout=180, user=usr, cwd=path)

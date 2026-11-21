@@ -2,8 +2,13 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
-## 1.5.21 – 2026-11-17
+## 1.5.21 – 2026-11-21
 
+- **Nextcloud: scheiternde Updates vorher erkennen.** ubusec prüft im Programmordner jeder Nextcloud (ohne
+  Datenordner), ob Dateien einem anderen Benutzer gehören als `config.php` oder für ihn schreibgeschützt sind. Beides
+  lässt den Updater mit „Check for write permissions failed“ abbrechen – typisch nach `occ` als root oder bei der
+  TensorFlow-Bibliothek der App Recognize (Rechte 555). Meldung MITTEL mit Beispielen und den passenden
+  chown-/chmod-Befehlen.
 - Hinweis zu Dovecot nennt zuerst die Einstellung für Dovecot 2.4 (`auth_allow_cleartext`, Ubuntu 26.04) und
   `disable_plaintext_auth` nur noch für 2.3.
 - Hinweis zur HTTPS-Weiterleitung korrigiert: Virtualmin kennt kein `modify-web --ssl-redirect`. Richtig ist
