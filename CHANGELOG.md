@@ -7,7 +7,11 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 - **Vollscan scheitert nicht mehr am Zeitlimit ohne Bericht.** Auf einem Mailserver lief Linux Malware Detect über
   12 Stunden durch Hunderttausende Mail-Dateien; nach 14 Stunden brach systemd den Vollscan ab, und es gab gar keinen
   Bericht.
-  - maldet lässt Postfächer (`Maildir`) jetzt aus – Mails prüft ClamAV schon bei der Zustellung, maldet sucht Web-Malware.
+  - maldet prüft nur noch, wo Web-Malware liegt und ausgeführt werden kann: die Webordner (DocumentRoot aus Apache/nginx
+    und die Virtualmin-Pfade `~/public_html` und `~/domains/*/public_html`, wie im maldet-eigenen Tagesscan), `cgi-bin`,
+    die tmp-Ordner der Domains und die Temp-Ordner des Systems – statt `/home` und `/var/www` komplett. Postfächer,
+    Nextcloud-Datenordner, Backups und Protokolle sind immer ausgenommen; die prüft der Virenscan mit ClamAV. Die Liste
+    steht je Scan in `maldet-roots.txt`.
   - maldet hat ein Zeitbudget (`MALDET_MAX_HOURS`, Standard 6 Stunden, und nie mehr, als bis zum Zeitlimit bleibt);
     nicht geschaffte Ordner meldet ubusec als NIEDRIG.
   - Eine Stunde vor dem Zeitlimit beginnt ubusec keinen neuen Bereich mehr und schreibt einen vollständigen Bericht

@@ -1674,6 +1674,34 @@ run_heartbeat() { # run_heartbeat "Text" befehl … – zeigt während langer Sc
   wait "$pid"
 }
 
+# Ordner, die Linux Malware Detect durchsucht: nur, wo Web-Malware tatsächlich liegt und ausgeführt werden kann –
+# die Webordner (DocumentRoot aus Apache, Virtualmin-Standardpfade wie im maldet-eigenen Tagesscan), cgi-bin und die
+# tmp-Ordner der Domains (PHP-Uploads). Nicht: Postfächer, Nextcloud-Daten, Backups, Home-Verzeichnisse als Ganzes –
+# die prüft der Virenscan (ClamAV). Ohne Treffer: die Ordner aus WEB_PATHS wie bisher.
+maldet_roots() {
+  local c=() d p keep=() q nested
+  if [ -d /etc/apache2 ]; then
+    while IFS= read -r d; do c+=("$d"); done < <(grep -rhiE '^\s*DocumentRoot\s' /etc/apache2/sites-enabled/ 2>/dev/null \
+      | awk '{gsub(/"/,"",$2); print $2}')
+  fi
+  if [ -d /etc/nginx ]; then
+    while IFS= read -r d; do c+=("$d"); done < <(grep -rhE '^\s*root\s' /etc/nginx/sites-enabled/ 2>/dev/null \
+      | awk '{gsub(/[";]/,"",$2); print $2}')
+  fi
+  for p in /home/*/public_html /home/*/domains/*/public_html /home/*/cgi-bin /home/*/domains/*/cgi-bin /home/*/tmp /var/www/html; do
+    c+=("$p")
+  done
+  # nur vorhandene Ordner, ohne Doppelte und ohne Unterordner eines anderen Eintrags
+  mapfile -t c < <(for d in "${c[@]}"; do [ -d "$d" ] && realpath -e "$d" 2>/dev/null; done | sort -u)
+  for d in "${c[@]}"; do
+    nested=0
+    for q in "${c[@]}"; do [ "$q" != "$d" ] && [[ $d == "$q"/* ]] && { nested=1; break; }; done
+    (( nested )) || keep+=("$d")
+  done
+  if (( ${#keep[@]} )); then printf '%s\n' "${keep[@]}"
+  else for p in $WEB_PATHS; do [ -d "$p" ] && echo "$p"; done; fi
+}
+
 mod_web() {
   local roots=() p
   for p in $WEB_PATHS; do [ -d "$p" ] && roots+=("$p"); done
@@ -1797,7 +1825,9 @@ WPAT
       else echo 'scan_tmpdir_paths="/var/tmp /dev/shm"' >>"$mconf"; fi
       # Dazu Postfächer: maldet sucht Web-Malware, Mails prüft ClamAV schon bei der Zustellung. Mit Hunderttausenden
       # Mail-Dateien brauchte maldet auf einem Mailserver sonst über 12 Stunden. (Einträge sind reguläre Ausdrücke.)
-      { cat "$mign" 2>/dev/null; clam_excludes; printf '%s\n' '/Maildir/' '/homes/[^/]+/Maildir/'; } \
+      # Ebenso die Nextcloud-Datenordner – unabhängig von den Virenscan-Einstellungen: Dort liegen Benutzerdateien, die
+      # der Webserver nicht ausführt (und die die Nextcloud-App „Antivirus“ bzw. der Virenscan mit ClamAV prüft).
+      { cat "$mign" 2>/dev/null; clam_excludes; nextcloud_datadirs 2>/dev/null; printf '%s\n' '/Maildir/' '/homes/[^/]+/Maildir/'; } \
         | grep '^/' | sort -u >"$mign.new" && mv -f "$mign.new" "$mign"
       # maldet mit eigener Prüfroutine statt über ClamAV: Mit ClamAV als Unterbau läuft maldet in EINEM clamscan-
       # Prozess (scan_workers gilt dann nicht) und prüft doppelt, was der Virenscan von ubusec schon parallel prüft.
@@ -1822,8 +1852,10 @@ WPAT
     budget=$(( ${MALDET_MAX_HOURS:-6} * 3600 ))
     left=$(( $(scan_limit) - ($(date +%s) - T0) - 5400 )); (( left < budget )) && budget=$left
     (( budget < 600 )) && budget=600
-    local mend=$(( $(date +%s) + budget ))
-    for r in "${roots[@]}"; do
+    local mend=$(( $(date +%s) + budget )) mroots=()
+    mapfile -t mroots < <(maldet_roots)
+    printf '%s\n' "${mroots[@]}" >"$RAW/maldet-roots.txt"
+    for r in "${mroots[@]}"; do
       left=$(( mend - $(date +%s) ))
       if (( left < 60 )); then mto+=("$r (nicht mehr begonnen)"); continue; fi
       mrc=0
