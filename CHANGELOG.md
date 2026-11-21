@@ -4,6 +4,10 @@ Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINO
 
 ## 1.5.21 – 2026-11-21
 
+- **Anmeldung in zwei Schritten.** Erst Benutzername und Passwort, danach – nur wenn für das Konto eingerichtet – der
+  Code aus der Authenticator-App auf einer eigenen Seite. Passwort-Manager füllen die erste Seite zuverlässig aus, und
+  die App muss erst geöffnet werden, wenn das Passwort stimmt. Zwischen den Schritten gilt niemand als angemeldet; der
+  zweite Schritt läuft nach 5 Minuten ab, die Sperre nach 5 Fehlversuchen zählt beide Schritte.
 - **Nextcloud: scheiternde Updates vorher erkennen.** ubusec prüft im Programmordner jeder Nextcloud (ohne
   Datenordner), ob Dateien einem anderen Benutzer gehören als `config.php` oder für ihn schreibgeschützt sind. Beides
   lässt den Updater mit „Check for write permissions failed“ abbrechen – typisch nach `occ` als root oder bei der

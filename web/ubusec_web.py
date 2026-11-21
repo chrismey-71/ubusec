@@ -1299,7 +1299,10 @@ def create_app():
         users = load_users()
         u = users.get(session.get("user", ""))
         if not u or session.get("pwv") != pw_version(u):
+            pre = session.get("pre")            # laufende Zwei-Schritt-Anmeldung nicht verwerfen
             session.clear()
+            if pre:
+                session["pre"] = pre
             return redirect(url_for("login", next=request.path if request.method == "GET" else None))
         now = time.time()
         if now - session.get("seen", 0) > idle:
@@ -1332,43 +1335,85 @@ def create_app():
     # ------------------------------------------------------- Login -----------
     @app.route("/login", methods=["GET", "POST"])
     def login():
+        """Anmeldung in zwei Schritten: erst Benutzername und Passwort, dann – falls eingerichtet – der Code aus der
+        Authenticator-App. Zwischen den Schritten steht in der Sitzung nur ein „Vorab“-Eintrag; als angemeldet gilt
+        erst, wer auch den Code bestanden hat."""
         users = load_users()
         if not users:
             return render_template("login.html", no_users=True)
         ip = request.remote_addr or "?"
-        if request.method == "POST":
+        if request.method == "GET" and request.args.get("neu"):
+            session.pop("pre", None)
+        pre = session.get("pre")
+        if pre and (time.time() - pre.get("t", 0) > 300 or pre.get("user") not in users):
+            session.pop("pre", None)
+            pre = None
+            if request.method == "POST" and request.form.get("step") == "code":
+                flash("Die Anmeldung ist abgelaufen. Bitte erneut mit Benutzername und Passwort beginnen.", "info")
+                return redirect(url_for("login"))
+
+        def blocked():
             now = time.time()
             with lock:
                 lst = [t for t in fails.get(ip, []) if now - t < 900]
                 fails[ip] = lst
             if len(lst) >= 5:
-                wait = int((900 - (now - lst[0])) // 60) + 1
-                flash("Zu viele Fehlversuche. Bitte in %d Minuten erneut versuchen." % wait, "error")
-                return render_template("login.html"), 429
-            name = request.form.get("username", "")
-            pw = request.form.get("password", "")
-            u = users.get(name)
-            ok = check_pw(pw, u["hash"] if u else DUMMY_HASH) and u is not None
-            if ok and u["totp"]:
-                c = totp_check(u["totp"], request.form.get("code", ""), totp_used.get(name, -1))
-                ok = c is not None
-                if ok:
-                    totp_used[name] = c
-            if ok:
-                with lock:
-                    fails.pop(ip, None)
-                session.clear()
-                session.permanent = True
-                session.update(user=name, csrf=secrets.token_urlsafe(32), seen=time.time(), pwv=pw_version(u))
-                record_login(name, ip, True, request.headers.get("User-Agent"))
-                nxt = request.args.get("next") or ""
-                return redirect(nxt if re.fullmatch(r"/(?!/)[A-Za-z0-9/_-]*", nxt) else url_for("dashboard"))
+                flash("Zu viele Fehlversuche. Bitte in %d Minuten erneut versuchen." % (int((900 - (now - lst[0])) // 60) + 1), "error")
+                return True
+            return False
+
+        def fail(name, msg):
             with lock:
-                fails.setdefault(ip, []).append(now)
+                fails.setdefault(ip, []).append(time.time())
             record_login(name, ip, False, request.headers.get("User-Agent"))
             time.sleep(0.5)
-            flash("Anmeldung fehlgeschlagen. Benutzername, Passwort oder Code stimmen nicht.", "error")
-        return render_template("login.html", needs_code=any(u["totp"] for u in users.values()))
+            flash(msg, "error")
+
+        def finish(name, u, nxt):
+            with lock:
+                fails.pop(ip, None)
+            session.clear()
+            session.permanent = True
+            session.update(user=name, csrf=secrets.token_urlsafe(32), seen=time.time(), pwv=pw_version(u))
+            record_login(name, ip, True, request.headers.get("User-Agent"))
+            return redirect(nxt if re.fullmatch(r"/(?!/)[A-Za-z0-9/_-]*", nxt or "") else url_for("dashboard"))
+
+        if request.method == "POST" and request.form.get("step") == "code":
+            # Schritt 2: Code
+            if not pre or not hmac.compare_digest(request.form.get("tok", ""), pre.get("tok", "")):
+                return redirect(url_for("login"))
+            if blocked():
+                return render_template("login.html", step="code", pre_user=pre["user"], tok=pre["tok"]), 429
+            name, u = pre["user"], users[pre["user"]]
+            c = totp_check(u["totp"], request.form.get("code", ""), totp_used.get(name, -1)) \
+                if u["totp"] and pre.get("pwv") == pw_version(u) else None
+            if c is not None:
+                totp_used[name] = c
+                return finish(name, u, pre.get("next"))
+            fail(name, "Der Code stimmt nicht. Bitte den aktuellen Code aus der App eingeben.")
+            return render_template("login.html", step="code", pre_user=name, tok=pre["tok"])
+
+        if request.method == "POST":
+            # Schritt 1: Benutzername und Passwort
+            if blocked():
+                return render_template("login.html"), 429
+            name = request.form.get("username", "")
+            u = users.get(name)
+            ok = check_pw(request.form.get("password", ""), u["hash"] if u else DUMMY_HASH) and u is not None
+            if not ok:
+                fail(name, "Anmeldung fehlgeschlagen. Benutzername oder Passwort stimmen nicht.")
+                return render_template("login.html")
+            nxt = request.args.get("next") or ""
+            if not u["totp"]:
+                return finish(name, u, nxt)
+            session.clear()
+            session["pre"] = {"user": name, "pwv": pw_version(u), "t": time.time(),
+                              "tok": secrets.token_urlsafe(24), "next": nxt}
+            return redirect(url_for("login"))
+
+        if pre:
+            return render_template("login.html", step="code", pre_user=pre["user"], tok=pre["tok"])
+        return render_template("login.html")
 
     @app.route("/logout", methods=["POST"])
     def logout():

@@ -12,6 +12,18 @@
   {% if no_users %}
     <p class="flash flash-info">Es ist noch kein Benutzer angelegt. Auf dem Server ausführen:</p>
     <p class="cmdline"><code>sudo ubusec --web-user admin --totp</code></p>
+  {% elif step == "code" %}
+  <form method="post" class="stack">
+    <input type="hidden" name="step" value="code">
+    <input type="hidden" name="tok" value="{{ tok }}">
+    <p class="muted">Angemeldet als <strong>{{ pre_user }}</strong> – jetzt noch der zweite Schritt.</p>
+    <label>Code aus der Authenticator-App
+      <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7"
+             placeholder="6 Ziffern" required autofocus>
+    </label>
+    <button class="btn btn-primary">Bestätigen</button>
+    <p class="small"><a href="{{ url_for('login', neu=1) }}">Abbrechen und neu anmelden</a></p>
+  </form>
   {% else %}
   <form method="post" class="stack">
     <label>Benutzername
@@ -20,13 +32,7 @@
     <label>Passwort
       <input name="password" type="password" autocomplete="current-password" required>
     </label>
-    {% if needs_code %}
-    <label>Code aus der Authenticator-App
-      <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" placeholder="6 Ziffern">
-      <small class="muted">Nur nötig, wenn für dein Konto die Zwei-Faktor-Anmeldung aktiv ist.</small>
-    </label>
-    {% endif %}
-    <button class="btn btn-primary">Anmelden</button>
+    <button class="btn btn-primary">Weiter</button>
   </form>
   {% endif %}
 </div>
