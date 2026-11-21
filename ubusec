@@ -17,7 +17,7 @@ umask 027
 export LC_ALL=C
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-UBUSEC_VERSION="1.5.21"
+UBUSEC_VERSION="1.5.22"
 SELF_PATH=$(readlink -f "$0")
 INSTALL_PATH=/usr/local/sbin/ubusec
 CONF_DIR=/etc/ubusec
@@ -53,6 +53,7 @@ UBUSEC_REPO="chrismey-71/ubusec"   # GitHub-Repository für den Versionshinweis
 UPDATE_CHECK=1               # bei GitHub nach neuen ubusec-Versionen fragen
 CLAM_PARALLEL=0              # 0 = automatisch, sonst Anzahl paralleler Prüfungen
 LYNIS_TIMEOUT=45m            # Höchstdauer des Lynis-Audits
+MALDET_MAX_HOURS=6           # Höchstdauer von Linux Malware Detect im Vollscan (Stunden)
 CLAM_QUICK_CHANGED=1         # Schnellscan: nur seit dem letzten vollständigen Virenscan geänderte Dateien
 CLAM_ENGINE=auto             # auto = laufenden ClamAV-Dienst (clamd) mitbenutzen; clamscan = immer eigene Prozesse
 CLAM_EXCLUDE_DB=1            # Datenbankdateien (MySQL/MariaDB, PostgreSQL …)
@@ -161,12 +162,14 @@ local_mounts() {
     | awk 'NR>1{print $6}' | sort -u
 }
 
+# Zeitlimit des laufenden Scans in Sekunden (wie TimeoutStartSec der systemd-Dienste)
+scan_limit() { if [ "${TRIGGER:-}" = timer ] && [ "$MODE" = quick ]; then echo 21600; else echo 50400; fi; }
+
 # Abbruch (systemctl stop, Strg+C, „Scan abbrechen“ in der Weboberfläche)
 on_abort() { # on_abort SIGNAL
   trap - INT TERM HUP EXIT
   pkill -TERM -P $$ 2>/dev/null          # laufendes Werkzeug (z. B. clamscan) mit beenden
-  local el=$(( $(date +%s) - ${T0:-0} )) limit=50400
-  [ "$TRIGGER" = timer ] && [ "$MODE" = quick ] && limit=21600
+  local el=$(( $(date +%s) - ${T0:-0} )) limit; limit=$(scan_limit)
   if [ -f "$STATE_DIR/cancel-requested" ]; then
     ABORT_REASON="Abbruch durch Benutzer in der Weboberfläche"; rm -f "$STATE_DIR/cancel-requested"
   elif [ "${1:-}" = INT ]; then ABORT_REASON="Abbruch auf der Kommandozeile (Strg+C)"
@@ -176,6 +179,17 @@ on_abort() { # on_abort SIGNAL
   else ABORT_REASON="Von außen beendet (z. B. systemctl stop)"; fi
   [ "$CUR_MOD" = malware ] && [ -n "${RAW:-}" ] && SUB_DONE=$(clam_count)
   write_status false "$CUR_MOD" "$MOD_I" "$MOD_N" 130 ""
+  # Teilbericht mit allem, was bis hierher fertig war (nicht bei Abbruch durch den Benutzer – der will meist neu starten)
+  if [ -n "${FINDINGS:-}" ] && [ -f "$FINDINGS" ] && [[ $ABORT_REASON != Abbruch* ]]; then
+    local missing="" x
+    for x in ${RUN_MODULES:-}; do [[ " ${DONE_MODULES:-} " == *" $x "* ]] || missing+="${MOD_TITLE[$x]:-$x}, "; done
+    add HOCH "${CUR_MOD:-tools}" "Scan abgebrochen – Bericht unvollständig: $ABORT_REASON" \
+      "Abgebrochen bei: ${MOD_TITLE[$CUR_MOD]:-$CUR_MOD} nach $(fmt_dur "$el")" \
+      "Nicht (vollständig) geprüft: ${missing%, }" \
+      "Langsame Bereiche stehen unter „Laufzeiten“; einzeln nachholen: Weboberfläche → Scan → Ausgewählte Bereiche"
+    [ -n "$CUR_MOD" ] && MOD_TIME[$CUR_MOD]=$(( $(date +%s) - ${MOD_T0:-$(date +%s)} ))
+    write_report abort 2>/dev/null || true
+  fi
   [ -n "${LOG_DIR:-}" ] && printf '%s Scan abgebrochen (%s, PID %s): %s\n' "$(date '+%F %T')" "${MODE_LABEL:-$MODE}" "$$" "$ABORT_REASON" >>"$LOG_DIR/web-audit.log"
   log "ubusec: Scan abgebrochen – $ABORT_REASON"
   exit 130
@@ -1781,7 +1795,10 @@ WPAT
     if [ -f "$mconf" ]; then
       if grep -q '^scan_tmpdir_paths=' "$mconf"; then sed -i 's|^scan_tmpdir_paths=.*|scan_tmpdir_paths="/var/tmp /dev/shm"|' "$mconf"
       else echo 'scan_tmpdir_paths="/var/tmp /dev/shm"' >>"$mconf"; fi
-      { cat "$mign" 2>/dev/null; clam_excludes; } | grep '^/' | sort -u >"$mign.new" && mv -f "$mign.new" "$mign"
+      # Dazu Postfächer: maldet sucht Web-Malware, Mails prüft ClamAV schon bei der Zustellung. Mit Hunderttausenden
+      # Mail-Dateien brauchte maldet auf einem Mailserver sonst über 12 Stunden. (Einträge sind reguläre Ausdrücke.)
+      { cat "$mign" 2>/dev/null; clam_excludes; printf '%s\n' '/Maildir/' '/homes/[^/]+/Maildir/'; } \
+        | grep '^/' | sort -u >"$mign.new" && mv -f "$mign.new" "$mign"
       # maldet mit eigener Prüfroutine statt über ClamAV: Mit ClamAV als Unterbau läuft maldet in EINEM clamscan-
       # Prozess (scan_workers gilt dann nicht) und prüft doppelt, was der Virenscan von ubusec schon parallel prüft.
       # Mit scan_clamscan=0 arbeitet maldet mit mehreren Prozessen und nimmt seine Signaturen aus den ClamAV-Ordnern
@@ -1800,16 +1817,30 @@ WPAT
     # „Automatisch“ überlässt es maldet (2 je CPU-Kern, höchstens 8).
     if [ "${CLAM_PARALLEL:-0}" -gt 0 ] 2>/dev/null; then mw=$(( CLAM_PARALLEL > 8 ? 8 : CLAM_PARALLEL )); fi
     : >"$RAW/maldet.txt"
+    # Zeitbudget: höchstens MALDET_MAX_HOURS (Standard 6) und nie so lange, dass der ganze Scan am Zeitlimit scheitert
+    local budget left mrc mto=() 
+    budget=$(( ${MALDET_MAX_HOURS:-6} * 3600 ))
+    left=$(( $(scan_limit) - ($(date +%s) - T0) - 5400 )); (( left < budget )) && budget=$left
+    (( budget < 600 )) && budget=600
+    local mend=$(( $(date +%s) + budget ))
     for r in "${roots[@]}"; do
+      left=$(( mend - $(date +%s) ))
+      if (( left < 60 )); then mto+=("$r (nicht mehr begonnen)"); continue; fi
+      mrc=0
       if [ "$MODE" = full ]; then
         log "   Linux Malware Detect durchsucht: $r (vollständig)"
-        run_heartbeat "Linux Malware Detect durchsucht $r vollständig" nice -n 19 maldet -co "scan_workers=$mw,scan_clamscan=0" -a "$r" >>"$RAW/maldet.txt" 2>&1
+        run_heartbeat "Linux Malware Detect durchsucht $r vollständig" timeout -k 60 "$left" nice -n 19 maldet -co "scan_workers=$mw,scan_clamscan=0" -a "$r" >>"$RAW/maldet.txt" 2>&1 || mrc=$?
       else
         log "   Linux Malware Detect durchsucht: $r (Dateien der letzten $days Tage)"
         run_heartbeat "Linux Malware Detect prüft in $r die Dateien der letzten $days Tage" \
-          nice -n 19 maldet -co "scan_workers=$mw,scan_clamscan=0" -r "$r" "$days" >>"$RAW/maldet.txt" 2>&1
+          timeout -k 60 "$left" nice -n 19 maldet -co "scan_workers=$mw,scan_clamscan=0" -r "$r" "$days" >>"$RAW/maldet.txt" 2>&1 || mrc=$?
       fi
+      (( mrc == 124 || mrc == 137 )) && mto+=("$r (abgebrochen)")
     done
+    if (( ${#mto[@]} )); then
+      add NIEDRIG web "Linux Malware Detect hat sein Zeitbudget ($(fmt_dur "$budget")) aufgebraucht – nicht alles geprüft" "${mto[@]}" \
+        "Budget ändern: MALDET_MAX_HOURS in /etc/ubusec/ubusec.conf (Standard 6); Postfächer (Maildir) sind bereits ausgenommen"
+    fi
     SUB_TEXT=""
     clam_rfxn_cleanup
     local hits rep
@@ -3265,16 +3296,31 @@ main() {
   RUN_MODULES=$(for m in $ALL_MODULES; do [[ " $RUN_MODULES " == *" $m "* ]] && printf '%s ' "$m"; done)
 
   declare -gA MOD_TIME=()
+  DONE_MODULES=""
   local t i=0 total; total=$(wc -w <<<"$RUN_MODULES")
   for m in $RUN_MODULES; do
-    i=$((i+1)); t=$(date +%s)
+    i=$((i+1)); t=$(date +%s); MOD_T0=$t
+    # Kurz vor dem Zeitlimit keine neuen Bereiche mehr anfangen – lieber einen vollständigen Teilbericht als gar keinen
+    if (( $(date +%s) - T0 > $(scan_limit) - 3600 )); then
+      add MITTEL "${DONE_MODULES%% *}" "Scan vor dem Zeitlimit beendet – nicht geprüfte Bereiche: $(for x in $RUN_MODULES; do [[ " $DONE_MODULES " == *" $x "* ]] || printf '%s ' "${MOD_TITLE[$x]}"; done)" \
+        "Laufzeit bisher: $(fmt_dur $(( $(date +%s) - T0 ))) von höchstens $(fmt_dur "$(scan_limit)")" \
+        "Langsame Bereiche stehen unten unter „Laufzeiten“; einzeln nachholen: Weboberfläche → Scan → Ausgewählte Bereiche"
+      break
+    fi
     log "[$i/$total] ${MOD_TITLE[$m]} …"
     CUR_MOD=$m; MOD_I=$i; MOD_N=$total; SUB_DONE=0; SUB_TOTAL=0; SUB_TEXT=""; SUB_START=0
     write_status true "$m" "$i" "$total"
     "mod_$m"
     MOD_TIME[$m]=$(( $(date +%s) - t ))
+    DONE_MODULES+="$m "
   done
+  write_report
+  trap - EXIT
+}
 
+# Bericht aus den bisherigen Befunden schreiben – am Ende des Scans und bei einem Abbruch (Teilbericht)
+write_report() { # write_report [abort]
+  local partial=${1:-}
   SORTED=$RAW/findings.sorted.tsv
   sort -t$'\t' -k1,1nr -s "$FINDINGS" >"$SORTED"
   local maxr; maxr=$(cut -f1 "$SORTED" | sort -nr | head -1); maxr=${maxr:-0}
@@ -3290,11 +3336,16 @@ main() {
   [ "$QUIET" = 1 ] || render_text 4
 
   notify
-  cp "$SORTED" "$STATE_DIR/last-findings.$MODE.tsv"
+  # Ein Teilbericht dient nicht als Vergleichsgrundlage – sonst erschienen beim nächsten Scan alte Befunde als „neu“
+  [ -n "$partial" ] || cp "$SORTED" "$STATE_DIR/last-findings.$MODE.tsv"
   local g; g=$(grp)
   chgrp -R "$g" "$RAW" "$REPORT_TXT" "$REPORT_HTML" "$REPORT_JSON" 2>/dev/null
   chmod -R g+rX,o-rwx "$RAW" 2>/dev/null
   local ec=0; case $maxr in 4) ec=3 ;; 3) ec=2 ;; 2|1) ec=1 ;; esac
+  if [ -n "$partial" ]; then
+    write_status false "$CUR_MOD" "$MOD_I" "$MOD_N" 130 "$(basename "$REPORT_JSON")"
+    return 0
+  fi
   write_status false "" 0 0 "$ec" "$(basename "$REPORT_JSON")"
   find "$LOG_DIR" -maxdepth 1 -name 'report-*' -mtime +"$KEEP_DAYS" -delete 2>/dev/null
   trap - EXIT

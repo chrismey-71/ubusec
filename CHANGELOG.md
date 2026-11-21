@@ -2,6 +2,21 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.5.22 – 2026-11-21
+
+- **Vollscan scheitert nicht mehr am Zeitlimit ohne Bericht.** Auf einem Mailserver lief Linux Malware Detect über
+  12 Stunden durch Hunderttausende Mail-Dateien; nach 14 Stunden brach systemd den Vollscan ab, und es gab gar keinen
+  Bericht.
+  - maldet lässt Postfächer (`Maildir`) jetzt aus – Mails prüft ClamAV schon bei der Zustellung, maldet sucht Web-Malware.
+  - maldet hat ein Zeitbudget (`MALDET_MAX_HOURS`, Standard 6 Stunden, und nie mehr, als bis zum Zeitlimit bleibt);
+    nicht geschaffte Ordner meldet ubusec als NIEDRIG.
+  - Eine Stunde vor dem Zeitlimit beginnt ubusec keinen neuen Bereich mehr und schreibt einen vollständigen Bericht
+    über das Geprüfte (MITTEL: welche Bereiche fehlen).
+  - Wird ein Scan trotzdem abgebrochen (Zeitlimit, systemctl stop, Neustart), schreibt ubusec einen Teilbericht mit
+    allen bis dahin gefundenen Befunden (HOCH: „Scan abgebrochen – Bericht unvollständig“). Teilberichte zählen nicht
+    als Vergleichsgrundlage für „neu seit dem letzten Scan“. Bei „Scan abbrechen“ durch den Benutzer bleibt es beim
+    bisherigen Verhalten.
+
 ## 1.5.21 – 2026-11-21
 
 - **Anmeldung in zwei Schritten.** Erst Benutzername und Passwort, danach – nur wenn für das Konto eingerichtet – der
