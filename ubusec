@@ -186,7 +186,7 @@ on_abort() { # on_abort SIGNAL
     add HOCH "${CUR_MOD:-tools}" "Scan abgebrochen – Bericht unvollständig: $ABORT_REASON" \
       "Abgebrochen bei: ${MOD_TITLE[$CUR_MOD]:-$CUR_MOD} nach $(fmt_dur "$el")" \
       "Nicht (vollständig) geprüft: ${missing%, }" \
-      "Langsame Bereiche stehen unter „Laufzeiten“; einzeln nachholen: Weboberfläche → Scan → Ausgewählte Bereiche"
+      "Dauer je Bereich steht im Bericht neben der Überschrift; einzeln nachholen: Weboberfläche → Scan → Ausgewählte Bereiche"
     [ -n "$CUR_MOD" ] && MOD_TIME[$CUR_MOD]=$(( $(date +%s) - ${MOD_T0:-$(date +%s)} ))
     write_report abort 2>/dev/null || true
   fi
@@ -3304,7 +3304,7 @@ main() {
     if (( $(date +%s) - T0 > $(scan_limit) - 3600 )); then
       add MITTEL "${DONE_MODULES%% *}" "Scan vor dem Zeitlimit beendet – nicht geprüfte Bereiche: $(for x in $RUN_MODULES; do [[ " $DONE_MODULES " == *" $x "* ]] || printf '%s ' "${MOD_TITLE[$x]}"; done)" \
         "Laufzeit bisher: $(fmt_dur $(( $(date +%s) - T0 ))) von höchstens $(fmt_dur "$(scan_limit)")" \
-        "Langsame Bereiche stehen unten unter „Laufzeiten“; einzeln nachholen: Weboberfläche → Scan → Ausgewählte Bereiche"
+        "Dauer je Bereich steht im Bericht neben der Überschrift; einzeln nachholen: Weboberfläche → Scan → Ausgewählte Bereiche"
       break
     fi
     log "[$i/$total] ${MOD_TITLE[$m]} …"
