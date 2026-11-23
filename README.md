@@ -237,7 +237,7 @@ Am einfachsten über „Als Fehlalarm ausblenden“ in der Weboberfläche. Von H
 
 ubusec selbst steht unter der [MIT-Lizenz](LICENSE).
 
-**Mitgeliefert** werden nur die Schriften Instrument Sans und Red Hat Mono (SIL Open Font License 1.1,
+**Mitgeliefert** werden nur die Schriften Barlow, Barlow Semi Condensed und Red Hat Mono (SIL Open Font License 1.1,
 Lizenztexte in `web/static/fonts/`).
 
 **Nicht mitgeliefert** werden die Prüfwerkzeuge. ubusec installiert sie über die Paketquellen von Ubuntu

@@ -20,5 +20,5 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-Mitgelieferte Schriften (web/static/fonts/): Instrument Sans und Red Hat Mono,
+Mitgelieferte Schriften (web/static/fonts/): Barlow, Barlow Semi Condensed und Red Hat Mono,
 jeweils unter der SIL Open Font License 1.1 (siehe die *-OFL.txt-Dateien).

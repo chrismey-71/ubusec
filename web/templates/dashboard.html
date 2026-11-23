@@ -24,26 +24,12 @@
   </section>
 {% else %}
   <header class="verdict verdict-{{ verdict.level }}">
-    {% if LOOK == 'mac' %}
-    <div class="alert-icon" aria-hidden="true">
-      {% if verdict.level == 'kritisch' %}<svg viewBox="0 0 32 32"><path d="M10 1h12l9 9v12l-9 9H10l-9-9V10z" class="ic-fill"/><path d="M16 7v12M16 23v3" class="ic-mark"/></svg>
-      {% elif verdict.level in ('hoch', 'mittel') %}<svg viewBox="0 0 32 32"><path d="M16 2 31 29H1z" class="ic-fill"/><path d="M16 11v9M16 23v3" class="ic-mark"/></svg>
-      {% else %}<svg viewBox="0 0 32 32"><rect x="2" y="2" width="28" height="28" rx="3" class="ic-fill"/><path d="m9 16 5 5 9-10" class="ic-mark"/></svg>{% endif %}
-    </div>
-    {% endif %}
     <div class="verdict-text">
       <p class="verdict-word">Ergebnis: {{ plakette.word }}</p>
       <h1>{{ verdict.headline }}</h1>
       <p class="lede">{{ verdict.text }}</p>
       {{ ui.counts(state.counts) }}
     </div>
-    {% if LOOK == 'mac' %}
-    <dl class="dev-meta">
-      <div><dt>Sicherheitswert</dt><dd>{{ state.score }}<span>/100</span></dd></div>
-      <div><dt>Letzter Vollscan</dt><dd>{% if plakette.last %}<a href="{{ url_for('report', rid=plakette.last_id) }}">{{ plakette.last }}</a>{% else %}–{% endif %}</dd></div>
-      <div><dt>Nächster Vollscan</dt><dd>{% if plakette.next_day %}{{ plakette.next_wd }} {{ plakette.next_day }}{% else %}<a href="{{ url_for('settings') }}#zeitplan" class="warn-text">nicht eingeplant</a>{% endif %}</dd></div>
-    </dl>
-    {% else %}
     <div class="verdict-side">
     {% set p = plakette %}
     <figure class="plakette plakette-{{ p.level }}{% if not p.next_day %} plakette-ohne{% endif %}">
@@ -64,26 +50,15 @@
           <text class="pl-small" x="60" y="68" text-anchor="middle">eingeplant</text>
         {% endif %}
       </svg>
-      {% if LOOK != 'technik' %}
-      <figcaption>
-        {% if p.last %}Letzter Vollscan <a href="{{ url_for('report', rid=p.last_id) }}">{{ p.last }}</a>
-        {% else %}Noch kein Vollscan{% endif %}
-        {% if not p.next_day %}<br><a href="{{ url_for('settings') }}#zeitplan">Zeitplan einrichten</a>{% endif %}
-      </figcaption>
-      {% endif %}
     </figure>
-    {% if LOOK == 'technik' %}
     <dl class="dev-meta">
       <div><dt>Sicherheitswert</dt><dd>{{ state.score }}<span>/100</span></dd></div>
       <div><dt>Letzter Vollscan</dt><dd>{% if plakette.last %}<a href="{{ url_for('report', rid=plakette.last_id) }}">{{ plakette.last }}</a>{% else %}–{% endif %}</dd></div>
       {% if not plakette.next_day %}<div><dt>Nächster Vollscan</dt><dd><a href="{{ url_for('settings') }}#zeitplan" class="warn-text">nicht eingeplant</a></dd></div>{% endif %}
     </dl>
-    {% endif %}
     </div>
-    {% endif %}
   </header>
 
-  {% if LOOK == 'technik' %}
   <section class="statusfeld" aria-label="Zustand je Prüfbereich">
     {% for m in modstat %}
     <a class="mstat {% if m.worst %}sev-{{ m.worst|lower }}{% elif m.checked %}is-ok{% else %}is-never{% endif %}"
@@ -95,7 +70,6 @@
     </a>
     {% endfor %}
   </section>
-  {% endif %}
 
   {% if status.running or status.queued %}{{ ui.progress(status) }}{% endif %}
 
