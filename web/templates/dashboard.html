@@ -30,6 +30,13 @@
       <p class="lede">{{ verdict.text }}</p>
       {{ ui.counts(state.counts) }}
     </div>
+    {% if LOOK == 'technik' %}
+    <dl class="dev-meta">
+      <div><dt>Sicherheitswert</dt><dd>{{ state.score }}<span>/100</span></dd></div>
+      <div><dt>Letzter Vollscan</dt><dd>{% if plakette.last %}<a href="{{ url_for('report', rid=plakette.last_id) }}">{{ plakette.last }}</a>{% else %}–{% endif %}</dd></div>
+      <div><dt>Nächster Vollscan</dt><dd>{% if plakette.next_day %}{{ plakette.next_wd }} {{ plakette.next_day }}{% else %}<a href="{{ url_for('settings') }}#zeitplan" class="warn-text">nicht eingeplant</a>{% endif %}</dd></div>
+    </dl>
+    {% else %}
     {% set p = plakette %}
     <figure class="plakette plakette-{{ p.level }}{% if not p.next_day %} plakette-ohne{% endif %}">
       <svg viewBox="0 0 120 120" role="img"
@@ -55,7 +62,22 @@
         {% if not p.next_day %}<br><a href="{{ url_for('settings') }}#zeitplan">Zeitplan einrichten</a>{% endif %}
       </figcaption>
     </figure>
+    {% endif %}
   </header>
+
+  {% if LOOK == 'technik' %}
+  <section class="statusfeld" aria-label="Zustand je Prüfbereich">
+    {% for m in modstat %}
+    <a class="mstat {% if m.worst %}sev-{{ m.worst|lower }}{% elif m.checked %}is-ok{% else %}is-never{% endif %}"
+       href="{% if m.rid %}{{ url_for('report', rid=m.rid) }}#mod-{{ m.id }}{% else %}{{ url_for('scan') }}{% endif %}">
+      <span class="led" aria-hidden="true"></span>
+      <span class="mtitle">{{ m.title }}</span>
+      <span class="mval">{% if m.worst %}{{ m.n }} offen{% elif m.checked %}in Ordnung{% else %}nie geprüft{% endif %}</span>
+      <span class="mtime">{% if m.checked %}{{ m.checked | ago }}{% endif %}</span>
+    </a>
+    {% endfor %}
+  </section>
+  {% endif %}
 
   {% if status.running or status.queued %}{{ ui.progress(status) }}{% endif %}
 

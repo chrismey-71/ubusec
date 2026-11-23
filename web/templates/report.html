@@ -23,7 +23,7 @@
 
 {% for m in mods %}
   {% set fs = r.findings | selectattr('module', 'equalto', m) | list %}
-  <section class="mod" data-mod="{{ m }}">
+  <section class="mod" id="mod-{{ m }}" data-mod="{{ m }}">
     <div class="section-head">
       <h2>{{ MOD_TITLE[m] }}</h2>
       <span class="muted small">{{ r.modules[m] | dur }}</span>

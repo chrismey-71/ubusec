@@ -1,0 +1,116 @@
+/* Variante „Technik“: Frontplatte eines Messgeräts. Graues Gehäuse, dichte Raster, Messwerte in Festbreite,
+   Zustandsanzeigen (LEDs) je Prüfbereich als das eine auffällige Element. Wird nach app.css geladen. */
+
+@font-face { font-family: "Barlow"; src: url("fonts/Barlow-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight: 600 700; font-display: swap; }
+
+:root {
+  --paper: #dfe3e7;        /* Gehäuse */
+  --surface: #eef1f3;      /* Anzeigefeld */
+  --ink: #1b2127;
+  --muted: #56616c;
+  --line: #b4bcc4;
+  --line-strong: #7d8893;
+  --action: #1f5c9a;       /* Signalblau */
+  --action-ink: #ffffff;
+  --niedrig: #4d7590;
+  --code-bg: #d6dce1;
+  --focus: #1f5c9a;
+  --sans: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --head: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  --led-ok: #2f8a4f;
+  --led-off: #a6aeb6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #171c21;
+    --surface: #1e252c;
+    --ink: #e1e6ea;
+    --muted: #97a3ae;
+    --line: #313b45;
+    --line-strong: #56636f;
+    --action: #7cb2ea;
+    --action-ink: #10151a;
+    --niedrig: #8fb6d3;
+    --code-bg: #262f38;
+    --focus: #9cc6f2;
+    --led-ok: #5ccf86;
+    --led-off: #45505b;
+  }
+}
+
+body { font-size: 1rem; line-height: 1.5; }
+h1 { font-size: 2rem; letter-spacing: 0; }
+h2 { font-size: 1.15rem; font-weight: 700; margin: 2rem 0 .6rem; }
+
+/* Kopfzeile wie das Typenschild eines Geräts */
+.top { background: var(--ink); border-bottom: 0; color: var(--surface); }
+.brand { color: #8a96a2; }
+.brand:hover { color: #ffffff; }
+.hostname { font-family: var(--mono); font-weight: 400; font-size: 1.05rem; color: #ffffff; }
+.top nav a { color: #c9d1d8; font-size: .95rem; margin-bottom: 0; }
+.top nav a:hover { color: #fff; border-bottom-color: var(--line-strong); }
+.top nav a[aria-current="page"] { color: #fff; border-bottom-color: #7cb2ea; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .top { background: #0f1317; } }
+
+/* Übersicht: Ergebnis links, Messwerte rechts */
+.verdict { align-items: end; padding-bottom: 1.25rem; }
+.verdict-word { font-size: .95rem; }
+.verdict h1 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); }
+.dev-meta { margin: 0; display: grid; grid-template-columns: auto; border: 1px solid var(--line); background: var(--surface); min-width: 15rem; }
+.dev-meta > div { display: flex; justify-content: space-between; gap: 1.5rem; padding: .45rem .75rem; border-bottom: 1px solid var(--line); }
+.dev-meta > div:last-child { border-bottom: 0; }
+.dev-meta dt { color: var(--muted); font-size: .9rem; }
+.dev-meta dd { margin: 0; font-family: var(--mono); font-size: .95rem; }
+.dev-meta dd span { color: var(--muted); }
+.counts li b { font-size: 1.45rem; }
+
+/* Statusfeld: eine Zustandsanzeige je Prüfbereich */
+.statusfeld {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
+  background: var(--surface); border-top: 1px solid var(--line); border-left: 1px solid var(--line); margin: 1.5rem 0 .5rem;
+}
+.mstat {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: .1rem .6rem;
+  align-items: center; padding: .6rem .75rem; background: var(--surface); color: var(--ink); text-decoration: none;
+  border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.mstat:hover { background: var(--paper); }
+.mstat .led { grid-row: 1 / 3; width: .8rem; height: .8rem; border-radius: 50%; background: var(--c, var(--led-off));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--c, var(--led-off)) 25%, transparent); }
+.mstat.is-ok { --c: var(--led-ok); }
+.mstat.is-never { --c: var(--led-off); }
+.mstat .mtitle { grid-column: 2 / 4; font-weight: 600; line-height: 1.25; }
+.mstat .mval { grid-column: 2; font-size: .85rem; color: var(--c); font-weight: 600; }
+.mstat.is-never .mval { color: var(--muted); font-weight: 400; }
+.mstat.is-ok .mval { color: var(--led-ok); }
+.mstat .mtime { grid-row: 2; grid-column: 3; font-family: var(--mono); font-size: .75rem; color: var(--muted); text-align: right; white-space: nowrap; }
+
+/* Befunde: dichte Tabellenzeilen, Stufe als Anzeige-LED */
+.findings { border-top: 1px solid var(--line-strong); background: var(--surface); border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+.finding > summary { grid-template-columns: 6rem minmax(0, 1fr) auto; padding: .5rem .75rem; }
+.finding > summary:hover { background: var(--paper); }
+.finding .sev { border: 0; padding: 0; font-family: var(--sans); font-weight: 600; font-size: .9rem; display: inline-flex; align-items: center; gap: .45rem; }
+.finding .sev::before { content: ""; width: .65rem; height: .65rem; border-radius: 50%; background: var(--c); flex: none; }
+.finding[open] { background: var(--surface); }
+.finding .body { padding-left: 7.5rem; }
+.eff-tag { font-family: var(--mono); font-size: .8rem; }
+.fix h4 { font-size: 1rem; }
+.cmdline code { border-left: 3px solid var(--line-strong); border-radius: 0; }
+
+/* Berichtskopf */
+.protocol { border-top: 1px solid var(--line-strong); }
+.protocol > div { background: var(--surface); }
+
+.timers, table.recent { border-top: 1px solid var(--line-strong); }
+.timers dd, table.recent td.muted { font-family: var(--mono); font-size: .88rem; }
+.btn { border-radius: 2px; font-weight: 600; }
+input:not([type=checkbox]):not([type=radio]), select { border-radius: 2px; }
+
+@media (max-width: 52rem) {
+  .verdict { grid-template-columns: 1fr; }
+  .dev-meta { min-width: 0; }
+  .statusfeld { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mstat .mtime { display: none; }
+  .finding .sev { font-size: .85rem; }
+}

@@ -555,6 +555,19 @@ PLAKETTE_WORT = {"kritisch": "gefährliche Mängel", "hoch": "erhebliche Mängel
 WOCHENTAG = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
+def module_status(state):
+    """Je Prüfbereich: schwerster offener Befund, Anzahl, Zeitpunkt der letzten Prüfung (Statusfeld der Übersicht)."""
+    order = {s: i for i, s in enumerate(SEVERITIES)}
+    out = []
+    for m, title, _ in MODULES:
+        fs = [f for f in state["findings"] if f.get("module") == m and f.get("severity") != "INFO"]
+        worst = min((f["severity"] for f in fs), key=lambda s: order.get(s, 9), default=None)
+        src = state["sources"].get(m)
+        out.append({"id": m, "title": title, "n": len(fs), "worst": worst,
+                    "checked": src.get("finished") if src else None, "rid": src.get("id") if src else None})
+    return out
+
+
 def plakette(reports, timers, level):
     """Daten für die Prüfplakette der Übersicht: letzter Vollscan, nächster geplanter Vollscan, Ergebnis.
     Wie bei einer echten Plakette steht der Monat der nächsten Prüfung oben."""
@@ -1331,7 +1344,8 @@ def create_app():
 
     @app.context_processor
     def ctx():
-        return dict(NEW_VERSION=update_info() if session.get("user") else None,MODULES=MODULES, MOD_TITLE=MOD_TITLE, SEVERITIES=SEVERITIES, SEV_NAME=SEV_NAME,
+        return dict(LOOK=request.cookies.get("look") if request.cookies.get("look") in ("technik",) else "pruef",
+                    NEW_VERSION=update_info() if session.get("user") else None,MODULES=MODULES, MOD_TITLE=MOD_TITLE, SEVERITIES=SEVERITIES, SEV_NAME=SEV_NAME,
                     QUICK=QUICK, csrf=session.get("csrf", ""), user=session.get("user"),
                     host=os.uname().nodename, INCIDENT=INCIDENT, VERSION=VERSION)
 
@@ -1475,8 +1489,16 @@ def create_app():
         timers = timer_info()
         vd = verdict(state, os.uname().nodename)
         return render_template("dashboard.html", reports=reports[:6], state=state, chart=chart(history), verdict=vd,
-                               plakette=plakette(reports, timers, vd["level"]),
+                               plakette=plakette(reports, timers, vd["level"]), modstat=module_status(state),
                                status=read_status(), timers=timers, last=reports[0] if reports else None)
+
+    @app.route("/aussehen/<name>")
+    def set_look(name):
+        """Vorschau der Gestaltungsvarianten (Prüfbericht / Technik) – merkt sich die Wahl im Browser."""
+        resp = redirect(request.referrer if (request.referrer or "").startswith(request.host_url) else url_for("dashboard"))
+        resp.set_cookie("look", name if name in ("technik",) else "", max_age=365 * 86400, samesite="Lax",
+                        httponly=True, secure=request.is_secure)
+        return resp
 
     @app.route("/scan", methods=["GET", "POST"])
     def scan():
