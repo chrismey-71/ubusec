@@ -133,6 +133,8 @@
     <p class="cmdline"><code>sudo ubusec --update</code><button type="button" class="copy" data-copy="sudo ubusec --update">Kopieren</button></p>
     <p class="muted small">Aus Sicherheitsgründen aktualisiert sich ubusec nie selbstständig – ein Programm mit root-Rechten, das sich selbst aus dem Internet erneuert, wäre ein lohnendes Angriffsziel.</p>
   </div>
+  {% elif me.latest and ver_tuple(VERSION) > ver_tuple(me.latest) %}
+  <p class="muted">Installiert ist ein neuerer Stand als die zuletzt veröffentlichte Version {{ me.latest }} – vermutlich direkt aus dem Quellcode. Nach der Veröffentlichung von {{ VERSION }} steht hier „aktuell“.</p>
   {% elif me.latest %}
   <p class="ok-line">ubusec ist aktuell.</p>
   {% endif %}

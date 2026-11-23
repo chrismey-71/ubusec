@@ -1290,6 +1290,10 @@ def create_app():
             return "vor %d Stunden" % (d // 3600) if d >= 7200 else "vor einer Stunde"
         return "vor %d Tagen" % (d // 86400)
 
+    @app.template_global("ver_tuple")
+    def g_ver_tuple(v):
+        return tuple(int(x) for x in re.findall(r"\d+", str(v or ""))[:4])
+
     @app.template_filter("ago_kurz")
     def f_ago_kurz(ts):
         """Kurzform für die Kacheln des Statusfelds: 35 min, 5 h, 3 Tg."""
