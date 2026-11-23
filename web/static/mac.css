@@ -1,0 +1,186 @@
+/* Variante „1987“: angelehnt an die Schreibtischoberfläche früher Schwarz-Weiß-Computer. Gerasterter Schreibtisch,
+   Menüleiste, ein großes Fenster mit gestreifter Titelleiste, harte 1-Pixel-Schatten, Pixelschrift für Titel.
+   Farbe gibt es – wie bei den ersten Farbbildschirmen – nur sparsam: für den Schweregrad. Wird nach app.css geladen. */
+
+@font-face { font-family: "Pixelify Sans"; src: url("fonts/PixelifySans.ttf") format("truetype"); font-weight: 400 700; font-display: swap; }
+
+:root {
+  --fg: #000000;
+  --win: #ffffff;
+  --paper: #ffffff;
+  --surface: #ffffff;
+  --ink: #000000;
+  --muted: #444444;
+  --line: #000000;
+  --line-strong: #000000;
+  --action: #000000;
+  --action-ink: #ffffff;
+  --code-bg: #eeeeee;
+  --focus: #000000;
+  --head: "Pixelify Sans", "Chicago", "Geneva", monospace;
+  --desk: repeating-conic-gradient(#000 0 25%, #fff 0 50%) 0 0 / 2px 2px;
+  --stripes: repeating-linear-gradient(#000 0 1px, #fff 1px 2px);
+  /* Schweregrade etwas kräftiger, damit sie auf Weiß als einzige Farbe wirken */
+  --krit: #c4141b;
+  --hoch: #d2560e;
+  --mittel: #9a7200;
+  --niedrig: #1f5fae;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #ffffff;
+    --win: #000000;
+    --paper: #000000;
+    --surface: #000000;
+    --ink: #ffffff;
+    --muted: #bbbbbb;
+    --line: #ffffff;
+    --line-strong: #ffffff;
+    --action: #ffffff;
+    --action-ink: #000000;
+    --code-bg: #222222;
+    --focus: #ffffff;
+    --desk: repeating-conic-gradient(#fff 0 25%, #000 0 50%) 0 0 / 2px 2px;
+    --stripes: repeating-linear-gradient(#fff 0 1px, #000 1px 2px);
+    --krit: #ff5a5f;
+    --hoch: #ff8a3d;
+    --mittel: #e8c042;
+    --niedrig: #6fa8ff;
+  }
+}
+
+body { background: var(--desk); color: var(--fg); }
+a { color: var(--fg); }
+h1, h2, h3, h4 { font-family: var(--head); font-weight: 700; letter-spacing: 0; }
+:focus-visible { outline: 2px dotted var(--fg); outline-offset: 2px; border-radius: 0; }
+
+/* Menüleiste */
+.top { background: var(--win); border-bottom: 1px solid var(--fg); padding: 0 1rem; gap: 0 1.5rem; }
+.top-id { padding: .3rem 0; gap: .8rem; }
+.brand { font-family: var(--head); font-size: 1rem; color: var(--fg); }
+.hostname { font-family: var(--head); font-weight: 400; font-size: 1rem; color: var(--fg); }
+.top nav { gap: 0; margin-left: 1rem; }
+.top nav a { font-family: var(--head); padding: .3rem .7rem; border: 0; margin: 0; color: var(--fg); }
+.top nav a:hover, .top nav a[aria-current="page"] { background: var(--fg); color: var(--win); font-weight: 400; }
+
+/* Hauptinhalt: ein großes Fenster auf dem Schreibtisch */
+main {
+  background: var(--win); border: 1px solid var(--fg); box-shadow: 2px 2px 0 var(--fg);
+  margin: 1.5rem auto 2rem; padding: 0 1.75rem 2rem; max-width: 66rem; width: calc(100% - 2rem);
+}
+.win-title {
+  position: relative; display: flex; justify-content: center; align-items: center; margin: 0 -1.75rem 1.5rem;
+  background: var(--stripes); background-clip: content-box; padding: .25rem .3rem; border-bottom: 1px solid var(--fg);
+  font-family: var(--head); font-weight: 700;
+}
+.win-title > span:last-child { background: var(--win); padding: 0 .7rem; }
+.win-close { position: absolute; left: .8rem; top: 50%; transform: translateY(-50%); width: .85rem; height: .85rem;
+  border: 1px solid var(--fg); background: var(--win); box-shadow: 0 0 0 2px var(--win); }
+.foot { background: var(--win); border-top: 1px solid var(--fg); color: var(--fg); }
+.foot a, .linkbtn { color: var(--fg); }
+
+/* Abschnittstitel als kleine Fensterleisten */
+h2 { display: flex; align-items: center; justify-content: center; font-size: 1.05rem; margin: 2rem 0 0;
+  background: var(--stripes); background-clip: content-box; padding: .25rem; border: 1px solid var(--fg); border-bottom: 0; }
+h2 > span { background: var(--win); padding: 0 .6rem; }
+.section-head { position: relative; margin: 2rem 0 0; display: block; }
+.section-head h2 { margin: 0; }
+.section-head > a, .section-head > span.muted {
+  position: absolute; right: .5rem; top: 50%; transform: translateY(-50%); background: var(--win); padding: 0 .4rem;
+  font-size: .85rem; color: var(--fg);
+}
+
+/* Ergebnis als Hinweisfenster mit Symbol */
+.verdict { grid-template-columns: auto minmax(0, 1fr) auto; border: 1px solid var(--fg); box-shadow: 2px 2px 0 var(--fg);
+  padding: 1.25rem 1.5rem; gap: 1rem 1.5rem; align-items: start; }
+.alert-icon svg { width: 3rem; height: 3rem; display: block; }
+.ic-fill { fill: var(--win); stroke: var(--fg); stroke-width: 2; }
+.verdict-kritisch .ic-fill { fill: var(--krit); stroke: var(--fg); }
+.verdict-hoch .ic-fill, .verdict-mittel .ic-fill { fill: var(--mittel); }
+.ic-mark { fill: none; stroke: var(--fg); stroke-width: 3; stroke-linecap: square; }
+.verdict-kritisch .ic-mark { stroke: #fff; }
+.verdict-word { font-family: var(--head); color: var(--fg); font-size: 1rem; }
+.verdict h1 { font-size: clamp(1.6rem, 3vw, 2.1rem); color: var(--fg); }
+.verdict-kritisch h1 { color: var(--fg); }
+.verdict .lede { color: var(--fg); font-size: 1rem; }
+.counts li b { font-family: var(--head); font-size: 1.3rem; }
+.counts li.zero { color: var(--muted); }
+
+.dev-meta { margin: 0; border: 1px solid var(--fg); min-width: 14rem; }
+.dev-meta > div { display: flex; justify-content: space-between; gap: 1rem; padding: .3rem .6rem; border-bottom: 1px dotted var(--fg); }
+.dev-meta > div:last-child { border-bottom: 0; }
+.dev-meta dt { font-size: .85rem; }
+.dev-meta dd { margin: 0; font-family: var(--head); }
+.dev-meta dd span { color: var(--muted); }
+
+/* Listen im Fenster: Befunde, Termine, letzte Scans */
+.findings, .timers, table.recent, .protocol { border: 1px solid var(--fg); border-top: 1px solid var(--fg); background: var(--win); }
+.finding { border-bottom: 1px dotted var(--fg); }
+.finding:last-child { border-bottom: 0; }
+.finding > summary { padding: .45rem .6rem; }
+.finding > summary:hover { background: var(--win); text-decoration: underline; }
+.finding[open] > summary { background: var(--fg); color: var(--win); }
+.finding[open] > summary .sev, .finding[open] > summary .eff-tag, .finding[open] > summary .new { color: var(--win); }
+.finding[open] { background: var(--win); }
+.finding .sev { border: 0; padding: 0; font-family: var(--head); font-weight: 400; display: inline-flex; align-items: center; gap: .4rem; }
+.finding .sev::before { content: ""; width: .7rem; height: .7rem; background: var(--c); border: 1px solid var(--fg); flex: none; }
+.finding .body { padding: .75rem .75rem 1rem 7rem; }
+.new { color: var(--fg); }
+.eff-tag { font-family: var(--head); color: var(--fg); }
+.det, .muted { color: var(--muted); }
+.fix { border-color: var(--fg); border-style: dotted; }
+.fix li::marker { font-family: var(--head); color: var(--fg); }
+.cmdline code { background: var(--win); border: 1px solid var(--fg); border-radius: 0; color: var(--fg); }
+.copy { border: 1px solid var(--fg); border-radius: 5px; background: var(--win); color: var(--fg); font-family: var(--head); }
+
+.timers { padding: .6rem .8rem; }
+table.recent td { border-bottom: 1px dotted var(--fg); padding: .35rem .6rem; }
+table.recent tr:last-child td { border-bottom: 0; }
+.chart { border: 1px solid var(--fg); border-top: 0; padding: .5rem; max-width: none; background: var(--win); }
+.chart .line, .chart .dot { stroke: var(--fg); }
+.chart .dot.full { fill: var(--fg); }
+.chart .grid { stroke: var(--fg); stroke-dasharray: 1 2; }
+.cols > section > p.muted { margin-top: .5rem; }
+.note { border-left: 0; border: 1px dotted var(--fg); padding: .5rem .8rem; color: var(--fg); }
+
+/* Berichtskopf wie ein Info-Fenster */
+.protocol { margin-top: 1rem; }
+.protocol > div { border-color: var(--fg); border-style: dotted; background: var(--win); }
+.protocol dt { font-family: var(--head); color: var(--fg); }
+.crumb a { font-family: var(--head); }
+
+/* Bedienelemente */
+.btn { font-family: var(--head); font-weight: 400; border: 1px solid var(--fg); border-radius: 7px; background: var(--win); color: var(--fg); padding: .35rem 1rem; }
+.btn:hover { background: var(--fg); color: var(--win); }
+.btn-primary { background: var(--win); color: var(--fg); box-shadow: 0 0 0 1px var(--win), 0 0 0 4px var(--fg); margin: 4px; }
+.btn-primary:hover { background: var(--fg); color: var(--win); filter: none; }
+input:not([type=checkbox]):not([type=radio]), select { border: 1px solid var(--fg); border-radius: 0; background: var(--win); color: var(--fg); }
+input[type=checkbox] {
+  appearance: none; width: .95rem; height: .95rem; border: 1px solid var(--fg); background: var(--win); margin: .2rem 0 0;
+}
+input[type=checkbox]:checked {
+  background:
+    linear-gradient(45deg, transparent 45%, var(--fg) 45% 55%, transparent 55%),
+    linear-gradient(-45deg, transparent 45%, var(--fg) 45% 55%, transparent 55%), var(--win);
+}
+input[type=radio] { appearance: none; width: .95rem; height: .95rem; border: 1px solid var(--fg); border-radius: 50%; background: var(--win); }
+input[type=radio]:checked { background: radial-gradient(var(--fg) 0 35%, var(--win) 40%); }
+.flash { border: 1px solid var(--fg); border-left-width: 1px; background: var(--win); border-radius: 0; box-shadow: 2px 2px 0 var(--fg); }
+
+@media (max-width: 52rem) {
+  main { padding: 0 1rem 1.5rem; width: calc(100% - 1rem); margin-top: .75rem; }
+  .win-title { margin: 0 -1rem 1rem; }
+  .verdict { grid-template-columns: auto minmax(0, 1fr); padding: 1rem; }
+  .verdict .dev-meta { grid-column: 1 / -1; min-width: 0; }
+  .alert-icon svg { width: 2.25rem; height: 2.25rem; }
+  .finding .body { padding-left: .75rem; }
+  .top nav a { padding: .3rem .5rem; }
+}
+
+.downloads { border: 1px solid var(--fg); border-top: 0; padding-bottom: .6rem; margin-top: 2rem; }
+.downloads > h2 { margin: 0 -1px; }
+.downloads > p, .downloads > details { margin: .6rem .8rem 0; }
+@media (max-width: 52rem) {
+  .section-head > a { position: static; transform: none; display: block; text-align: right; border: 1px solid var(--fg);
+    border-bottom: 0; padding: .2rem .5rem; }
+}

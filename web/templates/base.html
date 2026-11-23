@@ -6,7 +6,7 @@
 <meta name="robots" content="noindex, nofollow">
 <title>{% block title %}ubusec{% endblock %} – {{ host }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
-{% if LOOK == 'technik' %}<link rel="stylesheet" href="{{ url_for('static', filename='technik.css') }}">{% endif %}
+{% if LOOK in ('technik', 'mac') %}<link rel="stylesheet" href="{{ url_for('static', filename=LOOK + '.css') }}">{% endif %}
 <link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
 <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
@@ -33,6 +33,7 @@
     </div>
   </header>
   <main id="inhalt">
+    {% if LOOK == 'mac' %}<div class="win-title" aria-hidden="true"><span class="win-close"></span><span>{{ host }}</span></div>{% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, m in messages %}<p class="flash flash-{{ cat }}" role="status">{{ m }}</p>{% endfor %}
     {% endwith %}

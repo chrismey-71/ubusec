@@ -1344,7 +1344,7 @@ def create_app():
 
     @app.context_processor
     def ctx():
-        return dict(LOOK=request.cookies.get("look") if request.cookies.get("look") in ("technik",) else "pruef",
+        return dict(LOOK=request.cookies.get("look") if request.cookies.get("look") in ("technik", "mac") else "pruef",
                     NEW_VERSION=update_info() if session.get("user") else None,MODULES=MODULES, MOD_TITLE=MOD_TITLE, SEVERITIES=SEVERITIES, SEV_NAME=SEV_NAME,
                     QUICK=QUICK, csrf=session.get("csrf", ""), user=session.get("user"),
                     host=os.uname().nodename, INCIDENT=INCIDENT, VERSION=VERSION)
@@ -1496,7 +1496,7 @@ def create_app():
     def set_look(name):
         """Vorschau der Gestaltungsvarianten (Prüfbericht / Technik) – merkt sich die Wahl im Browser."""
         resp = redirect(request.referrer if (request.referrer or "").startswith(request.host_url) else url_for("dashboard"))
-        resp.set_cookie("look", name if name in ("technik",) else "", max_age=365 * 86400, samesite="Lax",
+        resp.set_cookie("look", name if name in ("technik", "mac") else "", max_age=365 * 86400, samesite="Lax",
                         httponly=True, secure=request.is_secure)
         return resp
 
