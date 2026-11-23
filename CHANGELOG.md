@@ -2,6 +2,14 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.6.1 – 2026-11-23
+
+- **Statusfeld der Übersicht:** Bei „in Ordnung“ lief der Zustand in die Zeitangabe hinein oder brach um. Die Kacheln
+  zeigen die Zeit seit der letzten Prüfung jetzt kurz (36 min, 5 h, 3 Tg.); die lange Form steht im Tooltip.
+- **Werkzeuge:** Ist ein neuerer Stand installiert als die zuletzt veröffentlichte Version, steht dort ein Hinweis
+  statt „ubusec ist aktuell“.
+- Projektseite in der neuen Gestaltung mit neuen Screenshots.
+
 ## 1.6.0 – 2026-11-23
 
 - **Neue Gestaltung der Weboberfläche** im Stil einer Gerätefront: graues Gehäuse, dunkle Kopfzeile mit dem
