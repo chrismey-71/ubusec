@@ -1290,6 +1290,18 @@ def create_app():
             return "vor %d Stunden" % (d // 3600) if d >= 7200 else "vor einer Stunde"
         return "vor %d Tagen" % (d // 86400)
 
+    @app.template_filter("ago_kurz")
+    def f_ago_kurz(ts):
+        """Kurzform für die Kacheln des Statusfelds: 35 min, 5 h, 3 Tg."""
+        d = int(time.time() - int(ts or 0))
+        if d < 90:
+            return "jetzt"
+        if d < 3600:
+            return "%d min" % (d // 60)
+        if d < 86400 * 2:
+            return "%d h" % (d // 3600)
+        return "%d Tg." % (d // 86400)
+
     @app.template_filter("titles")
     def f_titles(mods):
         return ", ".join(MOD_TITLE.get(m, m) for m in mods)

@@ -66,7 +66,7 @@
       <span class="led" aria-hidden="true"></span>
       <span class="mtitle">{{ m.title }}</span>
       <span class="mval">{% if m.worst %}{{ m.n }} offen{% elif m.checked %}in Ordnung{% else %}nie geprüft{% endif %}</span>
-      <span class="mtime">{% if m.checked %}{{ m.checked | ago }}{% endif %}</span>
+      <span class="mtime"{% if m.checked %} title="Zuletzt geprüft {{ m.checked | ago }}"{% endif %}>{% if m.checked %}{{ m.checked | ago_kurz }}{% endif %}</span>
     </a>
     {% endfor %}
   </section>
