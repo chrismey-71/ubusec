@@ -63,6 +63,16 @@ h2 { font-size: 1.15rem; font-weight: 700; margin: 2rem 0 .6rem; }
 .dev-meta dt { color: var(--muted); font-size: .9rem; }
 .dev-meta dd { margin: 0; font-family: var(--mono); font-size: .95rem; }
 .dev-meta dd span { color: var(--muted); }
+
+/* Prüfplakette neben den Messwerten: wie ein Rundinstrument in der Frontplatte */
+.verdict-side { display: flex; align-items: center; gap: 1.25rem; }
+.look-technik .plakette { width: 9.5rem; flex: none; }
+.look-technik .pl-disc { fill: var(--surface); stroke-width: 3; }
+.look-technik .pl-ring { stroke: var(--line-strong); stroke-dasharray: 1.5 3.2; stroke-width: 1.2; }
+.look-technik .pl-month { font-family: var(--mono); font-weight: 400; font-size: 9px; }
+.look-technik .pl-month.is-due { font-weight: 700; }
+.look-technik .pl-big { font-family: var(--mono); font-weight: 600; font-size: 15.5px; letter-spacing: -.03em; }
+.look-technik .pl-small { font-family: var(--head); font-size: 7.5px; letter-spacing: .02em; }
 .counts li b { font-size: 1.45rem; }
 
 /* Statusfeld: eine Zustandsanzeige je Prüfbereich */
@@ -80,7 +90,7 @@ h2 { font-size: 1.15rem; font-weight: 700; margin: 2rem 0 .6rem; }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--c, var(--led-off)) 25%, transparent); }
 .mstat.is-ok { --c: var(--led-ok); }
 .mstat.is-never { --c: var(--led-off); }
-.mstat .mtitle { grid-column: 2 / 4; font-weight: 600; line-height: 1.25; }
+.mstat .mtitle { grid-column: 2 / 4; font-weight: 600; line-height: 1.25; hyphens: auto; overflow-wrap: anywhere; }
 .mstat .mval { grid-column: 2; font-size: .85rem; color: var(--c); font-weight: 600; }
 .mstat.is-never .mval { color: var(--muted); font-weight: 400; }
 .mstat.is-ok .mval { color: var(--led-ok); }
@@ -109,7 +119,8 @@ input:not([type=checkbox]):not([type=radio]), select { border-radius: 2px; }
 
 @media (max-width: 52rem) {
   .verdict { grid-template-columns: 1fr; }
-  .dev-meta { min-width: 0; }
+  .dev-meta { min-width: 0; flex: 1; }
+  .look-technik .plakette { width: 7.5rem; }
   .statusfeld { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mstat .mtime { display: none; }
   .finding .sev { font-size: .85rem; }

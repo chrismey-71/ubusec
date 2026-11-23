@@ -37,13 +37,14 @@
       <p class="lede">{{ verdict.text }}</p>
       {{ ui.counts(state.counts) }}
     </div>
-    {% if LOOK in ('technik', 'mac') %}
+    {% if LOOK == 'mac' %}
     <dl class="dev-meta">
       <div><dt>Sicherheitswert</dt><dd>{{ state.score }}<span>/100</span></dd></div>
       <div><dt>Letzter Vollscan</dt><dd>{% if plakette.last %}<a href="{{ url_for('report', rid=plakette.last_id) }}">{{ plakette.last }}</a>{% else %}–{% endif %}</dd></div>
       <div><dt>Nächster Vollscan</dt><dd>{% if plakette.next_day %}{{ plakette.next_wd }} {{ plakette.next_day }}{% else %}<a href="{{ url_for('settings') }}#zeitplan" class="warn-text">nicht eingeplant</a>{% endif %}</dd></div>
     </dl>
     {% else %}
+    <div class="verdict-side">
     {% set p = plakette %}
     <figure class="plakette plakette-{{ p.level }}{% if not p.next_day %} plakette-ohne{% endif %}">
       <svg viewBox="0 0 120 120" role="img"
@@ -63,12 +64,22 @@
           <text class="pl-small" x="60" y="68" text-anchor="middle">eingeplant</text>
         {% endif %}
       </svg>
+      {% if LOOK != 'technik' %}
       <figcaption>
         {% if p.last %}Letzter Vollscan <a href="{{ url_for('report', rid=p.last_id) }}">{{ p.last }}</a>
         {% else %}Noch kein Vollscan{% endif %}
         {% if not p.next_day %}<br><a href="{{ url_for('settings') }}#zeitplan">Zeitplan einrichten</a>{% endif %}
       </figcaption>
+      {% endif %}
     </figure>
+    {% if LOOK == 'technik' %}
+    <dl class="dev-meta">
+      <div><dt>Sicherheitswert</dt><dd>{{ state.score }}<span>/100</span></dd></div>
+      <div><dt>Letzter Vollscan</dt><dd>{% if plakette.last %}<a href="{{ url_for('report', rid=plakette.last_id) }}">{{ plakette.last }}</a>{% else %}–{% endif %}</dd></div>
+      {% if not plakette.next_day %}<div><dt>Nächster Vollscan</dt><dd><a href="{{ url_for('settings') }}#zeitplan" class="warn-text">nicht eingeplant</a></dd></div>{% endif %}
+    </dl>
+    {% endif %}
+    </div>
     {% endif %}
   </header>
 
