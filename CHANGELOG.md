@@ -2,6 +2,20 @@
 
 Alle nennenswerten Änderungen an ubusec. Versionen folgen dem Schema MAJOR.MINOR.PATCH.
 
+## 1.6.0 – 2026-11-23
+
+- **Neue Gestaltung der Weboberfläche** im Stil einer Gerätefront: graues Gehäuse, dunkle Kopfzeile mit dem
+  Servernamen, Messwerte in Festbreitenschrift, Farbe nur für Zustand und Schweregrad.
+  - Die Übersicht zeigt je Prüfbereich eine Zustandsanzeige (LED) mit offenen Punkten und dem Alter der letzten
+    Prüfung; ein Klick führt direkt zum Bereich im Bericht.
+  - Die Prüfplakette zeigt, wann der nächste Vollscan fällig ist; ihr Ring hat die Farbe des Ergebnisses. Ist kein
+    Vollscan eingeplant, ist sie gestrichelt und verweist auf den Zeitplan.
+  - Werkzeuge zeigen ihren Zustand als LED, die Anmeldung hat ein Typenschild wie die Kopfzeile.
+  - Lange Bereichsnamen werden auf dem Handy getrennt statt abgeschnitten; helle und dunkle Darstellung folgen
+    der Systemeinstellung.
+  - Schriften: Barlow, Barlow Semi Condensed und Red Hat Mono (SIL Open Font License, mitgeliefert, keine externen
+    Quellen).
+
 ## 1.5.22 – 2026-11-21
 
 - **Vollscan scheitert nicht mehr am Zeitlimit ohne Bericht.** Auf einem Mailserver lief Linux Malware Detect über

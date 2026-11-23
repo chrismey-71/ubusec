@@ -4,7 +4,7 @@
 {% block content %}
 {% if status.queue_stuck %}
 <section class="stuck-box">
-  <h2>Scan-Auftrag wartet seit {{ status.queue_stuck }} Minuten</h2>
+  <h2><span>Scan-Auftrag wartet seit {{ status.queue_stuck }} Minuten</span></h2>
   <p>Der Dienst, der Aufträge der Weboberfläche ausführt, reagiert nicht. Auf dem Server ausführen:</p>
   <p class="cmdline"><code>sudo systemctl reset-failed ubusec-queue.service; sudo systemctl restart ubusec-queue.path</code><button type="button" class="copy" data-copy="sudo systemctl reset-failed ubusec-queue.service; sudo systemctl restart ubusec-queue.path">Kopieren</button></p>
   <form method="post" action="{{ url_for('scan_cancel') }}">
@@ -24,25 +24,65 @@
   </section>
 {% else %}
   <header class="verdict verdict-{{ verdict.level }}">
-    <h1>{{ verdict.headline }}</h1>
-    <p class="lede">{{ verdict.text }}</p>
-    {{ ui.strip(state.findings) }}
-    <div class="verdict-meta">
+    <div class="verdict-text">
+      <p class="verdict-word">Ergebnis: {{ plakette.word }}</p>
+      <h1>{{ verdict.headline }}</h1>
+      <p class="lede">{{ verdict.text }}</p>
       {{ ui.counts(state.counts) }}
-      <p class="score">Sicherheitswert <b>{{ state.score }}</b> von 100</p>
+    </div>
+    <div class="verdict-side">
+    {% set p = plakette %}
+    <figure class="plakette plakette-{{ p.level }}{% if not p.next_day %} plakette-ohne{% endif %}">
+      <svg viewBox="0 0 120 120" role="img"
+           aria-label="{% if p.next_day %}Nächster Vollscan {{ p.next_wd }} {{ p.next_day }}{% else %}Kein Vollscan eingeplant{% endif %}">
+        <circle class="pl-disc" cx="60" cy="60" r="57"/>
+        <circle class="pl-ring" cx="60" cy="60" r="35"/>
+        {% for m in p.months %}
+          {% if m.due %}<circle class="pl-due" cx="{{ m.x }}" cy="{{ m.y - 3.5 }}" r="6.5"/>{% endif %}
+          <text class="pl-month{% if m.due %} is-due{% endif %}" x="{{ m.x }}" y="{{ m.y }}" text-anchor="middle">{{ m.n }}</text>
+        {% endfor %}
+        {% if p.next_day %}
+          <text class="pl-small" x="60" y="49" text-anchor="middle">nächster Vollscan</text>
+          <text class="pl-big" x="60" y="67" text-anchor="middle">{{ p.next_day }}</text>
+          <text class="pl-small" x="60" y="79" text-anchor="middle">{{ p.next_wd }} {{ p.year }}</text>
+        {% else %}
+          <text class="pl-small" x="60" y="56" text-anchor="middle">kein Vollscan</text>
+          <text class="pl-small" x="60" y="68" text-anchor="middle">eingeplant</text>
+        {% endif %}
+      </svg>
+    </figure>
+    <dl class="dev-meta">
+      <div><dt>Sicherheitswert</dt><dd>{{ state.score }}<span>/100</span></dd></div>
+      <div><dt>Letzter Vollscan</dt><dd>{% if plakette.last %}<a href="{{ url_for('report', rid=plakette.last_id) }}">{{ plakette.last }}</a>{% else %}–{% endif %}</dd></div>
+      {% if not plakette.next_day %}<div><dt>Nächster Vollscan</dt><dd><a href="{{ url_for('settings') }}#zeitplan" class="warn-text">nicht eingeplant</a></dd></div>{% endif %}
+    </dl>
     </div>
   </header>
+
+  <section class="statusfeld" aria-label="Zustand je Prüfbereich">
+    {% for m in modstat %}
+    <a class="mstat {% if m.worst %}sev-{{ m.worst|lower }}{% elif m.checked %}is-ok{% else %}is-never{% endif %}"
+       href="{% if m.rid %}{{ url_for('report', rid=m.rid) }}#mod-{{ m.id }}{% else %}{{ url_for('scan') }}{% endif %}">
+      <span class="led" aria-hidden="true"></span>
+      <span class="mtitle">{{ m.title }}</span>
+      <span class="mval">{% if m.worst %}{{ m.n }} offen{% elif m.checked %}in Ordnung{% else %}nie geprüft{% endif %}</span>
+      <span class="mtime">{% if m.checked %}{{ m.checked | ago }}{% endif %}</span>
+    </a>
+    {% endfor %}
+  </section>
 
   {% if status.running or status.queued %}{{ ui.progress(status) }}{% endif %}
 
   {% set top = state.findings | rejectattr('severity', 'equalto', 'INFO') | list %}
   {% if top %}
-  <section>
+  <section class="todo">
     <div class="section-head">
-      <h2>Zuerst erledigen</h2>
+      <h2><span>Zuerst erledigen</span></h2>
       <a href="{{ url_for('recommendations') }}">Alle {{ top|length }} Empfehlungen</a>
     </div>
+    <div class="findings">
     {% for f in top[:5] %}{{ ui.finding(f, state.sources[f.module]) }}{% endfor %}
+    </div>
   </section>
   {% endif %}
 
@@ -53,7 +93,7 @@
 
   <div class="cols">
     <section>
-      <h2>Verlauf des Sicherheitswerts</h2>
+      <h2><span>Sicherheitswert {{ state.score }} von 100</span></h2>
       {% if chart.points|length > 1 %}
       <svg class="chart" viewBox="0 0 320 120" role="img" aria-label="Sicherheitswert der letzten {{ chart.points|length }} Scans">
         <line class="grid" x1="30" x2="316" y1="10" y2="10"/><line class="grid" x1="30" x2="316" y1="55" y2="55"/><line class="grid" x1="30" x2="316" y1="100" y2="100"/>
@@ -62,28 +102,32 @@
         {% for p in chart.points %}<a href="{{ url_for('report', rid=p.id) }}"><circle class="dot {{ p.cls }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ p.label }}: {{ p.score }}</title></circle></a>{% endfor %}
         <text class="axis" x="30" y="117">{{ chart.first }}</text><text class="axis" x="316" y="117" text-anchor="end">{{ chart.last }}</text>
       </svg>
-      <p class="muted small">Ausgefüllte Punkte sind Vollscans, Teilscans fließen nicht ein. Der Wert zieht pro Befund ab: kritisch 25, hoch 10, mittel 4, niedrig 1.</p>
+      <p class="muted small">Verlauf über die vollständigen Scans (ausgefüllte Punkte: Vollscans). Jeder offene Befund zieht ab:
+        kritisch 25, hoch 10, mittel 4, niedrig 1.</p>
       {% else %}
-      <p class="muted">Der Verlauf erscheint ab dem zweiten Scan.</p>
+      <p class="muted">Der Verlauf erscheint ab dem zweiten Scan. Jeder offene Befund zieht ab: kritisch 25, hoch 10, mittel 4, niedrig 1.</p>
       {% endif %}
     </section>
     <section>
-      <h2>Geplante Scans</h2>
+      <h2><span>Geplante Scans</span></h2>
       <dl class="timers">
         {% for t in timers %}
           <dt>{{ t.label }}</dt>
-          <dd>{% if t.active and t.next %}{{ t.next }}{% else %}<span class="muted">nicht eingeplant</span>{% endif %}</dd>
+          <dd>{% if t.active and t.next %}{{ t.nice }}{% else %}<span class="muted">nicht eingeplant</span>{% endif %}</dd>
         {% endfor %}
       </dl>
-      <h2>Letzte Scans</h2>
-      <ul class="recent">
+      <h2><span>Letzte Scans</span></h2>
+      <table class="recent">
+        <tbody>
         {% for r in reports %}
-        <li><a href="{{ url_for('report', rid=r.id) }}">{{ r.label }}</a>
-          <span class="muted">{{ r.finished | ago }}</span>
-          <span class="mini">{% for s in SEVERITIES if s != 'INFO' and r.counts[s] %}<i class="sev-{{ s|lower }}" title="{{ SEV_NAME[s] }}">{{ r.counts[s] }}</i>{% endfor %}</span>
-        </li>
+        <tr>
+          <td><a href="{{ url_for('report', rid=r.id) }}">{{ r.label }}</a></td>
+          <td class="muted">{{ r.finished | ago }}</td>
+          <td class="mini">{% for s in SEVERITIES if s != 'INFO' and r.counts[s] %}<i class="sev-{{ s|lower }}" title="{{ SEV_NAME[s] }}">{{ r.counts[s] }}</i>{% endfor %}</td>
+        </tr>
         {% endfor %}
-      </ul>
+        </tbody>
+      </table>
     </section>
   </div>
 {% endif %}

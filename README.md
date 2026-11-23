@@ -37,7 +37,7 @@ Neueste Version unter [Releases](https://github.com/chrismey-71/ubusec/releases)
 prüfen und installieren (Versionsnummer anpassen):
 
 ```bash
-VER=1.5.22
+VER=1.6.0
 curl -fLO https://github.com/chrismey-71/ubusec/releases/download/v$VER/ubusec-$VER.tar.gz
 curl -fLO https://github.com/chrismey-71/ubusec/releases/download/v$VER/SHA256SUMS
 sha256sum -c SHA256SUMS
@@ -237,7 +237,7 @@ Am einfachsten über „Als Fehlalarm ausblenden“ in der Weboberfläche. Von H
 
 ubusec selbst steht unter der [MIT-Lizenz](LICENSE).
 
-**Mitgeliefert** werden nur die Schriften Instrument Sans und Red Hat Mono (SIL Open Font License 1.1,
+**Mitgeliefert** werden nur die Schriften Barlow, Barlow Semi Condensed und Red Hat Mono (SIL Open Font License 1.1,
 Lizenztexte in `web/static/fonts/`).
 
 **Nicht mitgeliefert** werden die Prüfwerkzeuge. ubusec installiert sie über die Paketquellen von Ubuntu
