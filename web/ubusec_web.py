@@ -550,6 +550,42 @@ def verdict(state, host):
     return {"headline": head, "text": text, "level": lvl}
 
 
+PLAKETTE_WORT = {"kritisch": "gefährliche Mängel", "hoch": "erhebliche Mängel", "mittel": "geringe Mängel",
+                 "ok": "ohne Mängel"}
+WOCHENTAG = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
+def plakette(reports, timers, level):
+    """Daten für die Prüfplakette der Übersicht: letzter Vollscan, nächster geplanter Vollscan, Ergebnis.
+    Wie bei einer echten Plakette steht der Monat der nächsten Prüfung oben."""
+    import math
+    full = next((r for r in reports if r.get("mode") == "full" and "(nur" not in r.get("label", "")), None)
+    nxt = None
+    t = next((t for t in timers if t["label"] == "Vollscan"), None)
+    if t and t.get("active"):
+        m = re.search(r"(\d{4})-(\d\d)-(\d\d)", t.get("next") or "")
+        if m:
+            try:
+                nxt = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            except ValueError:
+                nxt = None
+    top = nxt.month if nxt else (datetime.now().month)
+    months = []
+    for mo in range(1, 13):
+        a = math.radians(((mo - top) % 12) * 30)
+        months.append({"n": mo, "x": round(60 + 44 * math.sin(a), 1), "y": round(60 - 44 * math.cos(a) + 3.5, 1),
+                       "due": bool(nxt) and mo == nxt.month})
+    last = datetime.fromtimestamp(full["started"]) if full else None
+    return {
+        "level": level, "word": PLAKETTE_WORT.get(level, ""), "months": months,
+        "next_day": nxt.strftime("%d.%m.") if nxt else None,
+        "next_wd": WOCHENTAG[nxt.weekday()] if nxt else None,
+        "year": (nxt or last or datetime.now()).strftime("%Y"),
+        "last": last.strftime("%d.%m.%Y") if last else None,
+        "last_id": full["id"] if full else None,
+    }
+
+
 def chart(history):
     pts = []
     n = len(history)
@@ -656,7 +692,15 @@ def timer_info():
                                 "--timestamp=pretty"], capture_output=True, text=True, timeout=5)
             kv = dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l)
             nxt = kv.get("NextElapseUSecRealtime", "")
-            out.append({"label": label, "active": kv.get("ActiveState") == "active", "next": nxt})
+            nice = nxt
+            m = re.search(r"(\d{4})-(\d\d)-(\d\d) (\d\d:\d\d)", nxt)
+            if m:
+                try:
+                    d = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                    nice = "%s %s, %s Uhr" % (WOCHENTAG[d.weekday()], d.strftime("%d.%m."), m.group(4))
+                except ValueError:
+                    pass
+            out.append({"label": label, "active": kv.get("ActiveState") == "active", "next": nxt, "nice": nice})
         except Exception:
             out.append({"label": label, "active": False, "next": ""})
     return out
@@ -1428,9 +1472,11 @@ def create_app():
         state = current_state(reports)
         # nur vollständige Scans sind untereinander vergleichbar (keine "--only"-Teilscans)
         history = list(reversed([r for r in reports if "(nur" not in r.get("label", "")][:30]))
-        return render_template("dashboard.html", reports=reports[:6], state=state, chart=chart(history),
-                               verdict=verdict(state, os.uname().nodename),
-                               status=read_status(), timers=timer_info(), last=reports[0] if reports else None)
+        timers = timer_info()
+        vd = verdict(state, os.uname().nodename)
+        return render_template("dashboard.html", reports=reports[:6], state=state, chart=chart(history), verdict=vd,
+                               plakette=plakette(reports, timers, vd["level"]),
+                               status=read_status(), timers=timers, last=reports[0] if reports else None)
 
     @app.route("/scan", methods=["GET", "POST"])
     def scan():

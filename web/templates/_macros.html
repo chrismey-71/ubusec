@@ -148,11 +148,11 @@
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="report" value="{{ r.id }}">
         <input type="hidden" name="idx" value="{{ f.idx }}">
-        <button class="btn {{ 'btn-primary' if vv == 'ok' else 'btn-quiet' }}" data-confirm="Diese Meldung künftig ausblenden? Nur für geprüfte Fehlalarme verwenden – echte Probleme verschwinden sonst aus allen Berichten. (Rückgängig: Einstellungen → Fehlalarme)">Als Fehlalarm ausblenden</button>
+        <button class="btn {{ 'btn-primary' if vv == 'ok' else 'btn-quiet' }}" data-confirm="Diese Meldung künftig ausblenden? Nur für geprüfte Fehlalarme verwenden – echte Probleme verschwinden sonst aus allen Berichten. (Rückgängig unter Einstellungen, Abschnitt Fehlalarme.)">Als Fehlalarm ausblenden</button>
       </form>
       {% endif %}
     </div>
-    {% if not vv %}<p class="small muted actions-help">Hast du etwas geändert? → „Bereich neu scannen“. Ist die Meldung sicher harmlos? → „Als Fehlalarm ausblenden“.</p>{% endif %}
+    {% if not vv %}<p class="small muted actions-help">Nach dem Beheben „Bereich neu scannen“. Ist die Meldung sicher harmlos, „Als Fehlalarm ausblenden“.</p>{% endif %}
     {% endif %}
   </div>
 </details>
